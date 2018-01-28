@@ -1,0 +1,21 @@
+*** Attention: In order to terminate, one has to eliminate the noop
+*** transition here!
+
+set trace substitution off .
+debug rewrite in THEORY : 
+(sys-start, < tau | #no-res
+       | let var("Fun") = fun(var("X"), var("Y")) -> 
+                 call atom("erlang") : atom("+") (var("X"), var("Y")) in
+	     let var("Pid") = call atom("erlang") : atom("self") () in 
+ 	         do
+		     call atom("erlang") : atom("!") (var("Pid"), {atom("code"),var("Fun")})
+		     receive
+			{ atom("code"), var("Code") } when atom("true") -> 
+                            apply var("Code") (int(1),int(2))
+		     after int(500) -> int(0)
+	| pid(0) 
+	| #empty-mbox 
+	| #empty-pid-seq 
+	| false 
+	| #empty-modenv >, 
+#empty-modenv, pid(0)) .

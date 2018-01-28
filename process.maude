@@ -1,0 +1,238 @@
+***(
+
+	PROCESS.MAUDE
+
+	This file contains the functional modules that define our representation of the
+	state of a set of concurrently running Core-Erlang processes.
+	
+	The SEM_PROCESS functional module defines an eight-tuple that captures the
+	state of an "autonomous" process. It contains all information that is needed
+	to evaluate Core-Erlang expression which do not lead to any kind of side-effect.
+	
+	The next module (SEM_PROCESSES) models a process system. This is a set of independent,
+	concurrently running processes. It is represented by an associative and commutative 
+	list where the processes are separated by ||.
+	
+	We consider such a set of concurrently running processes, together with some
+	additional information (such as the transition that led to the state) as a process
+	environment. The term-representation is defined in the third module (SEM_PROCESSENVIRONMENT).
+	
+	Last but not least, the PROCESS-OUTPUT module defines some helper functions that
+	are needed in order to pretty print and output a readable representation of a process
+	environment.
+		
+***)
+
+fmod SEM_PROCESS is
+	protecting SEM_LABEL .
+	protecting SEM_RESULT .
+	protecting SYNTAX .
+	protecting SEM_PID .
+	protecting SEM_MAILBOX .
+	protecting SEM_PID_SEQUENCE .
+	protecting BOOL .
+	protecting SEM_MODENV .
+	protecting MAUDE-SYNTAX-UPDOWN .
+
+	sort Process .
+	*** A process is an eight-tuple consisting of the components (in the given order):
+	*** 1. expression level label
+	*** 2. result value from the last side effect that changed to the system level
+	*** 3. the core-erlang expression that has to be evaluated next
+	*** 4. the process identifier
+	*** 5. the process' mailbox
+	*** 6. the set of all processes that are linked to this process
+	*** 7. the trap-exit flag
+	*** 8. the module environment (needed within the process in order to avoid
+	***    a change to the system level during inter module calls)
+	op <_|_|_|_|_|_|_|_> : Label SysResult Expr Pid Mailbox PidSequence Bool ModEnv -> Process [ctor] .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	
+	op #up : Process -> Term [frozen memo] .
+	op #downProcess : Term -> Process [memo] .
+	
+	var L : Label .
+	var RES : SysResult .
+	var EX : Expr .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+	
+	vars T1 T2 T3 T4 T5 T6 T7 T8 : Term .
+	
+	eq #up(< L | RES | EX | PID | MBOX | LINKS | TRAP | ME >) 
+		= '<_|_|_|_|_|_|_|_>[#up(L), #up(RES), #up(EX), #up(PID), #up(MBOX), #up(LINKS), #up(TRAP), #up(ME)] .
+		
+	eq #downProcess('<_|_|_|_|_|_|_|_>[T1,T2,T3,T4,T5,T6,T7,T8])
+		= < #downLabel(T1) 
+		  | #downSysResult(T2) 
+		  | #downExpr(T3) 
+		  | #downPid(T4) 
+		  | #downMailbox(T5) 
+		  | #downPidSequence(T6) 
+		  | #downBool(T7) 
+		  | #downModEnv(T8) > .
+endfm
+
+
+
+
+fmod SEM_PROCESSES is
+	protecting SEM_PROCESS .
+	protecting MAUDE-SYNTAX-UPDOWN .
+
+	*** A process system is modelled as an associative and commutative list of processes
+	*** as defined in SEM_PROCESS. The processes are separated by "||". Additionally, we
+	*** introduce #empty-processes as the identity element. This reduces the cases that
+	*** have to be distinguished when matching left hand sides of (directed) equations
+	*** and rules (we do not have to care about a one-elementary list; it is automatically
+	*** extended by the identity element).
+	sort Processes .
+	subsort Process < Processes .
+	
+	op #empty-processes : -> Processes [ctor] .
+	op _||_ : Processes Processes -> Processes [ctor assoc comm id: #empty-processes] .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	
+	op #up : Processes -> Term [frozen memo] .
+	op #downProcesses : Term -> Processes [memo] .
+	
+	var P : Process .
+	var PRCS : Processes .
+	var SUB : Substitution .
+	vars T T1 T2 : Term .
+	
+	eq #up(#empty-processes) = '#empty-processes.Processes .
+	ceq #up(P || PRCS) = '_||_[#up(P), #up(PRCS)] 
+		if (PRCS =/= #empty-processes) .
+	
+	eq #downProcesses('#empty-processes.Processes) = #empty-processes .
+	ceq #downProcesses(T) = #downProcess(T1) || #downProcesses(T2)
+		if SUB := metaMatch(GRAMMAR, '_||_['P:Process, 'PRCS:Processes], T, nil, 0)
+		/\ 'P:Process <- T1 ; 'PRCS:Processes <- T2 := SUB .
+endfm
+
+
+
+
+fmod SEM_PROCESSENVIRONMENT is
+	protecting SEM_SYSLABEL .
+	protecting SEM_PROCESSES .
+	protecting SEM_MODENV .
+	protecting SEM_PID_SEQUENCE .
+	protecting MAUDE-SYNTAX-UPDOWN .
+	
+	*** The process environment consists of four components:
+	*** 1. The system level label. This label indicates the transition (on the
+	***    system level, therefore a side-effect took place) that led to the
+	***    process system.
+	*** 2. The process system (i.e. set of all processes). Note: Due to our
+	***    underlying equational theory, the processes are grouped into equivalence
+	***    classes. The classes are represented by the normal forms according to
+	***    the equational theory.
+	*** 3. The current module environment. Processes that are created during
+	***    system evaluation get this environment as their local copy. We store the
+	***    module environment in the process system _and_ in every process. Currently,
+	***    they are identical; but one could also model inter-module calls as
+	***    system level transitions querying the global module environment. This
+	***    could be a first step towards specifying the semantics of hot code replacement.
+	*** 4. The sequence of PIDs that are currently in use. 
+	sort ProcessEnvironment .
+	
+	op ((_,_,_,_)) : SysLabel Processes ModEnv PidSequence -> ProcessEnvironment [ctor] .
+
+	*** When loading a Core-Erlang module, the functions defined therein can be
+	*** included into the process environment using the #update-process-environment
+	*** function.
+	op #update-process-environment : ProcessEnvironment ErlModule -> ProcessEnvironment .
+
+	var SL : SysLabel .
+	var PRCS : Processes .
+	var ME : ModEnv .
+	var PIDS : PidSequence .
+	var M : ErlModule .
+	
+	eq #update-process-environment((SL, PRCS, ME, PIDS),M) = (SL, PRCS, (ME, #extract-global-functions(M)), PIDS) .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	
+	op #up : ProcessEnvironment -> Term [frozen memo] .
+	op #downProcessEnvironment : Term -> ProcessEnvironment [memo] .
+	
+	vars T1 T2 T3 T4 : Term .
+	
+	eq #up((SL, PRCS, ME, PIDS)) = '`(_`,_`,_`,_`)[#up(SL), #up(PRCS), #up(ME), #up(PIDS)] .
+	eq #downProcessEnvironment('`(_`,_`,_`,_`)[T1,T2,T3,T4])
+		= (#downSysLabel(T1), #downProcesses(T2), #downModEnv(T3), #downPidSequence(T4)) .
+endfm
+
+
+
+
+fmod PROCESS-OUTPUT is
+	protecting QID .
+	protecting STRING .
+	protecting SEM_PROCESS .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting MAUDE-SYNTAX-UPDOWN .
+  
+  	*** In order to output a process environment in a readable form, we define
+	*** some output functions here. The #PrintProcessEnv function takes a whole
+	*** process environment as argument and creates a pretty-printed list of
+	*** quoted identifiers (QidList) which can be output by Maude's LOOP-MODE
+	*** I/O interface.
+  
+	op #PrintProcessEnv : ProcessEnvironment -> QidList .
+	op #PrintProcesses : Processes -> QidList .
+	op #PrintProcesses : Int Processes -> QidList .
+  
+	var EL : Label .
+	var RES : SysResult .
+	var EX : Expr .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+	
+	var SL : SysLabel .
+  	var PRCS : Processes .
+	var PIDS : PidSequence .
+	
+	var INT : Int .
+	
+	*** #PrintProcessEnv outputs a process environment. It pretty-prints the
+	*** system label followed by the list of processes in the process system
+	*** in ascending order.	
+	eq #PrintProcessEnv((SL, PRCS, ME, PIDS)) = 
+    	        '=== metaPrettyPrint(['SEM_SYSLABEL], #up(SL)) ' '===> '\n
+        	#PrintProcesses(PRCS) .
+	
+	*** #PrintProcesses takes a process system and creates a list of the processes
+	*** contained in the process system in ascending order.
+	eq #PrintProcesses(PRCS) = #PrintProcesses(0, PRCS) .
+	
+	*** The 2ary #PrintProcesses function is used to implement the sorting and
+	*** outputting of the processes.
+	*** We print out the process label and the process' mailbox. We do not
+	*** print the expression, the set of links or the module environment.
+	*** Note: This is a design decision; the output would get too long
+	***	  if everything was output.
+	eq #PrintProcesses(INT, < EL | RES | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS) = 
+        	metaPrettyPrint(['SEM_PID], #up(pid(INT))) ' ': '  
+		metaPrettyPrint(['SEM_LABEL], #up(EL)) '\t '\t '\t '\t 'MBox ': '  
+		metaPrettyPrint(['SEM_MAILBOX], #up(MBOX)) '\n
+		#PrintProcesses(INT + 1, PRCS) . 
+	eq #PrintProcesses(INT, #empty-processes) = nil .
+	eq #PrintProcesses(INT, PRCS) = #PrintProcesses(INT + 1, PRCS) [owise] .
+endfm

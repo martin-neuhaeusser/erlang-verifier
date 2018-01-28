@@ -1,0 +1,367 @@
+***( 
+
+	LTL-CHECK.MAUDE
+	
+	This file contains the modules defining the predicates and the interface
+	to the integrated model checker of the Maude system.
+	
+	The nodes of the computed LTS are terms of sort ProcessEnvironment. 
+	Intuitively, the system level label in the first component of each node-term
+	indicates which system level transition leads to the corresponding process
+	system. Note: The process system in such a node is already in normal form
+	w.r.t. the directed equations of the equational theory.
+	
+	In order to be able to specify a scheduler (i.e. one could be interested
+	only in those paths where starvation of processes due to the scheduler is 
+	prohibited) we also introduce the possibility of doing "nothing".
+	This leads to a linear growth of the search space (in the worst case by 
+	a factor of 2) due to the sys-noop label that is introduced.
+	Note: When a noop-operation takes place, the process system does not
+	change. But the system level label is set to "sys-noop". 
+	
+	With this approach, we are able to postulate a scheduling strategy as
+	a global premise when model-checking LTL formulas.
+	
+	The monitored transitions on the system level (i.e. send and receive 
+	transitions, process termination, links, etc.) can be checked by the 
+	following predicates (not all listed):
+     
+	* send(PID1, PID2, CONST) 	: Process with PID1 sends the message
+					  CONST to process with PID2
+	* receive(PID, CONST)   	: Process with pid PID receives the message
+					  CONST
+	* newproc(PID)			: A new process with pid PID is created
+					  (by a spawn or spawn-link system call)
+	* terminate(PID)		: The process with pid PID terminates.
+	* link(PID1,PID2)		: Two processes with pids PID1 and PID2 
+					  set up a process link (monitor each other)
+	* unlink(PID1,PID2)		: The processes tear down the link.	
+***)
+
+fmod PREDICATES is
+	protecting INT .
+	protecting META-LEVEL .
+	protecting META-UP-DOWN .
+	protecting LTL .
+	protecting LTL-SIMPLIFIER .
+	protecting MODEL-CHECKER .
+	protecting SEM_PROCESS .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting MAUDE-SYNTAX-UPDOWN .
+	including SATISFACTION .
+			  
+	*** We extend the otherwise "empty" sort State of the Maude model checker
+	*** with our process environment: 
+	subsort ProcessEnvironment < State .
+  
+	*** The scheduled predicate is valid iff the current state was reached by
+	*** evaluating a side effect of the specified process.
+	op scheduled : Int -> Prop .
+	
+	*** The running predicate applies to a given state iff the specified
+	*** process exists in the corresponding process environment.
+	*** Note: This does not imply that it will ever be evaluated further
+	***       due to the noop transition. It just states that the process
+	***	  exists.
+	op running : Int -> Prop .
+	
+	*** The blocked predicate is valid iff the specified process of the
+	*** current state is blocked (i.e. waiting for the arrival of a message
+	*** within a receive-statement with infinity as a timeout)
+	*** Note: This predicate does not apply to processes that are in
+	***       the waiting state!
+	op blocked : Int -> Prop .
+
+	*** The tau-proc predicate is used for debugging purposes. If everything works
+	*** fine, there must never be a process with a tau process label included
+	*** within a normalized process system. This predicate can be used to
+	*** check this validity condition.
+	op tau-proc : -> Prop .
+				
+	*** The start predicate is valid iff the state is the initial state.
+	op start : -> Prop .
+	
+	*** The noop predicate is valid iff the transition that led to the
+	*** current process was a sys-noop transition.
+	op noop : -> Prop .
+	
+	*** The send predicate applies to a state iff it was reached by executing
+	*** a send operation on the system level (the process given by the process
+	*** identifier in the first argument sent the message in the last argument
+	*** to the process that is identified by the second argument)
+	op send : Int Int Const -> Prop .
+	
+	*** The receive predicate applies to a state iff the process given as the
+	*** first argument receives the message in the 2nd argument. Note, that
+	*** the received message is already removed from the corresponding process
+	*** mailbox.
+	op receive : Int Const -> Prop .
+  	
+	*** The newproc predicate holds iff the last transition created a new process
+	*** with the specified process identifier.
+	op newproc : Int -> Prop .
+	
+	*** The timeout predicate holds iff the corresponding process of the
+	*** considered state evaluated the timeout expression of a receive
+	*** statement.
+	op timeout : Int -> Prop .
+
+	*** The signal predicate is valid iff the current state was reached because
+	*** the process specified in the 1st argument sent the signal (3rd argument)
+	*** to the process given in the 2nd argument.
+	op signal : Int Int Const -> Prop .
+	
+	*** The terminate predicate holds iff the current state is reached due
+	*** to termination of the specified process.
+	*** Note: The terminated process is already removed from the process
+	***       environment (and its pid is unused)
+	op terminate : Int -> Prop .
+  
+	*** The link and unlink predicates hold iff the processes supplied
+	*** in the first and second argument set up or pull down a bidirectional
+	*** link (as a result of the link/unlink system call or the spawn-link
+	*** system call or (a possibly cascading) process termination).
+	op link : Int Int -> Prop .
+	op unlink : Int Int -> Prop .
+  
+	vars P1 P2 : Int .
+	var C : Const .
+	vars A A1 : Atom .
+
+	var SL : SysLabel .
+	var PRCS : Processes .
+	var ME : ModEnv .
+	var PIDS : PidSequence .
+
+	*** The semantics of the predicates is defined according to the
+	*** system level labels of the normalized process environments
+	
+	*** First, we define those states, for which the scheduled predicate holds.
+	*** In fact, these are all states that are reached by any transition but the
+	*** "special" transitions sys-noop and sys-start.
+	eq (sys-sendmsg(pid(P1),pid(P2),C), PRCS, ME, PIDS) |= scheduled(P1) = true .
+	eq (sys-receive(pid(P1), C), PRCS, ME, PIDS) |= scheduled(P1) = true .
+	eq (sys-newproc(pid(P1), pid(P2), A, A1, C), PRCS, ME, PIDS) |= scheduled(P1) = true .
+	eq (sys-newproc-linked(pid(P1), pid(P2), A, A1, C), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	eq (sys-timeout(pid(P1)), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	eq (sys-signal(pid(P1), pid(P2), C), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	eq (sys-terminate(pid(P1)), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	eq (sys-link(pid(P1), pid(P2)), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	eq (sys-unlink(pid(P1), pid(P2)), PRCS, ME, PIDS) |= scheduled(P1) = true .           
+	
+	*** The running predicate holds iff the specified process identifier is
+	*** in the state's list of currently running processes.
+	eq (SL, PRCS, ME, pid(P1), PIDS) |= running(P1) = true .
+	
+	*** The blocked predicate can be used to test if the specified process
+	*** waits for the reception of a matching message. It only holds if the
+	*** processes is blocked by evaluation a receive with infinity as the
+	*** timeout value.
+	eq (SL, < blocked 
+		| R:SysResult 
+		| E:Expr 
+		| pid(P1) 
+		| M:Mailbox 
+		| L:PidSequence 
+		| T:Bool 
+		| ME:ModEnv > || PRCS, ME, PIDS) |= blocked(P1) = true .	
+
+	*** The tau-proc predicate is used for debugging: In a correctly normalized
+	*** process-system, every process has a process label indicating a side effect.
+	*** If we find a process with the tau label, this indicates that something
+	*** went wrong. (some built in function is called, that is not implemented yet?)
+	eq (SL, < tau 
+		| R:SysResult 
+		| E:Expr 
+		| pid(P1) 
+		| M:Mailbox 
+		| L:PidSequence 
+		| T:Bool 
+		| ME:ModEnv > || PRCS, ME, PIDS) |= tau-proc = true .	
+		
+	*** The start and noop predicates simply reflect the states system label.
+	eq (sys-start, PRCS, ME, PIDS) |= start = true .
+	eq (sys-noop, PRCS, ME, PIDS) |= noop = true .
+
+	
+	eq (sys-sendmsg(pid(P1),pid(P2),C), PRCS, ME, PIDS) |= send(P1, P2, C) = true .
+	eq (sys-receive(pid(P1), C), PRCS, ME, PIDS) |= receive(P1, C) = true .
+	eq (sys-newproc(pid(P1), pid(P2), A, A1, C), PRCS, ME, PIDS) |= newproc(P2) = true .
+	eq (sys-newproc-linked(pid(P1), pid(P2), A, A1, C), PRCS, ME, PIDS) |= newproc(P2) = true .           
+	eq (sys-timeout(pid(P1)), PRCS, ME, PIDS) |= timeout(P1) = true .
+	eq (sys-signal(pid(P1), pid(P2), C), PRCS, ME, PIDS) |= signal(P1,P2,C) = true .
+	eq (sys-terminate(pid(P1)), PRCS, ME, PIDS) |= terminate(P1) = true .
+	
+	*** The predicates link and unlink hold if a bidirectional link is set up or
+	*** teared down. Therefore we do not care about which process initiates the
+	*** corresponding action:
+	eq (sys-link(pid(P1), pid(P2)), PRCS, ME, PIDS) |= link(P1,P2) = true .
+	eq (sys-link(pid(P1), pid(P2)), PRCS, ME, PIDS) |= link(P2,P1) = true .
+	eq (sys-unlink(pid(P1), pid(P2)), PRCS, ME, PIDS) |= unlink(P1,P2) = true .
+	eq (sys-unlink(pid(P1), pid(P2)), PRCS, ME, PIDS) |= unlink(P2,P1) = true .
+		
+	
+	****************************************
+	*** META REPRESENTATION PART         ***
+	****************************************
+  
+	*** To correctly parse our self-defined predicates, we have to add the
+	*** #down operations for them, too:
+  
+	op #downProp : Term -> Prop .
+    
+	vars T1 T2 T3 : Term .
+  
+	eq #downProp('scheduled[T1]) = scheduled(#downInt(T1)) .
+	eq #downProp('running[T1]) = running(#downInt(T1)) .
+	eq #downProp('blocked[T1]) = blocked(#downInt(T1)) .
+	eq #downProp('tau-proc.Prop) = tau-proc .
+	  	
+	eq #downProp('start.Prop) = start .
+	eq #downProp('send[T1,T2,T3]) = send(#downInt(T1), #downInt(T2), #downExpr(T3)) .
+	eq #downProp('receive[T1,T2]) = receive(#downInt(T1), #downExpr(T2)) .
+	eq #downProp('newproc[T1]) = newproc(#downInt(T1)) .
+	eq #downProp('timeout[T1]) = timeout(#downInt(T1)) .
+	eq #downProp('signal[T1,T2,T3]) = signal(#downInt(T1), #downInt(T2), #downExpr(T3)) .
+	eq #downProp('terminate[T1]) = terminate(#downInt(T1)) .
+  
+	eq #downProp('link[T1,T2]) = link(#downInt(T1), #downInt(T2)) .
+	eq #downProp('unlink[T1,T2]) = unlink(#downInt(T1), #downInt(T2)) .
+endfm
+
+
+
+
+
+fmod LTL-FORMULAE is
+	protecting SYNTAX .
+	protecting PREDICATES .
+	protecting MODEL-CHECKER .
+	protecting META-UP-DOWN .
+	
+	*** In this module, we define the LTL formulas that allow specification of
+	*** a scheduling strategy. They can be used during model checking as a premise
+	*** to the "own" formula.
+	var INT : Int .
+	var IS : NeIntSeq .
+	
+	*** The scheduler "macro" takes a nonempty, comma-separated list of integers
+	*** as argument. They specify the set of processes that are created and should
+	*** be considered.
+	op scheduler : NeIntSeq -> Formula .
+	
+	*** The LTL formula that is created simply states, that whenever a process
+	*** exists it is either blocked or it is scheduled again later. The until
+	*** formula asserts, that it is the next time that the same process is scheduled:
+	*** If the process was terminated (and another "new" process was created that
+	*** got the same pid), it would not exist at least at the state that directly 
+	*** results from the old process' termination.
+	eq scheduler(INT) 
+		= [](running(INT) -> (running(INT) U (scheduled(INT) \/ blocked(INT)))) .
+	
+	eq scheduler(INT, IS) 
+		= [](running(INT) -> (running(INT) U (scheduled(INT) \/ blocked(INT)))) /\ scheduler(IS) .
+	
+	****************************************
+	*** META REPRESENTATION PART         ***
+	****************************************
+  
+	op #downLTL : Term -> Formula .
+	eq #downLTL('scheduler[T1]) = scheduler(#downNeIntSeq(T1)) .
+    	
+	sort NeIntSeq .
+	subsort Int < NeIntSeq .
+    	op _,_ : NeIntSeq NeIntSeq -> NeIntSeq [ctor assoc] .
+    	op #downNeIntSeq : Term -> NeIntSeq .
+    
+	vars T1 T2 T3 : Term .
+	var SUB : Substitution? .
+	 
+	ceq #downNeIntSeq(T1) = #downInt(T2), #downNeIntSeq(T3)
+		if SUB := metaMatch(GRAMMAR, '_`,_['I:Int, 'IS:NeIntSeq], T1, nil, 0)
+		/\ SUB :: Substitution
+		/\ 'I:Int <- T2 ; 'IS:NeIntSeq <- T3 := SUB .
+	eq #downNeIntSeq(T1) = #downInt(T1) [owise] .
+endfm 
+
+
+
+
+
+fmod DOWN-LTL is
+	protecting META-TERM .
+	protecting PREDICATES .
+	protecting LTL-FORMULAE .
+	  
+	*** To be able to parse the LTL formulas given on the command line as part of the
+	*** model-check command, we declare the corresponding #down operation:
+	op #downLTL : Term -> Formula .
+
+	vars T1 T2 : Term .
+    
+	eq #downLTL('True.Formula) = True .
+	eq #downLTL('False.Formula) = False .
+  
+	eq #downLTL('~_[T1]) = ~ #downLTL(T1) .
+	eq #downLTL('_/\_[T1,T2]) = #downLTL(T1) /\ #downLTL(T2) .
+	eq #downLTL('_\/_[T1,T2]) = #downLTL(T1) \/ #downLTL(T2) .
+	eq #downLTL('O_[T1]) = O #downLTL(T1) .
+	eq #downLTL('_U_[T1,T2]) = #downLTL(T1) U #downLTL(T2) .
+	eq #downLTL('_R_[T1,T2]) = #downLTL(T1) R #downLTL(T2) .
+	eq #downLTL('_->_[T1,T2]) = #downLTL(T1) -> #downLTL(T2) .
+	eq #downLTL('_<->_[T1,T2]) = #downLTL(T1) <-> #downLTL(T2) .
+	eq #downLTL('<>_[T1]) = <> #downLTL(T1) .
+	eq #downLTL('`[`]_[T1]) = [] #downLTL(T1) .
+	eq #downLTL('_W_[T1,T2]) = #downLTL(T1) W #downLTL(T2) .
+	eq #downLTL('_|->_[T1,T2]) = #downLTL(T1) |-> #downLTL(T2) .
+	eq #downLTL('_=>_[T1,T2]) = #downLTL(T1) => #downLTL(T2) .
+	eq #downLTL('_<=>_[T1,T2]) = #downLTL(T1) <=> #downLTL(T2) .
+	
+	eq #downLTL(T1) = #downProp(T1) [owise] .
+endfm
+
+
+
+
+
+fmod MODEL-CHECK-OUTPUT is
+	protecting QID .
+	protecting STRING .
+	protecting SYNTAX .
+	protecting PREDICATES .
+	protecting LTL-FORMULAE .
+	protecting MODEL-CHECKER .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting PROCESS-OUTPUT .
+  
+	*** To be able to output the results of the model checker, we define
+	*** the #PrintCounterexample operation which relies on the #PrintTransitionList
+	*** and #PrintTransition operations.
+	op #PrintModelCheckResult : ModelCheckResult -> QidList .
+	op #PrintTransitionList : TransitionList -> QidList .
+	op #PrintTransition : Transition -> QidList .
+  
+	var RULE : RuleName .
+	vars TLIST1 TLIST2 : TransitionList .  
+	var T : Transition .
+
+	var SL : SysLabel .
+  	var PRCS : Processes .
+	var ME : ModEnv .
+	var PIDS : PidSequence .
+	
+	var INT : Int .
+  
+	eq #PrintTransitionList(T TLIST1) 
+		= #PrintTransition(T) '\n #PrintTransitionList(TLIST1) .
+	eq #PrintTransitionList(nil) = '\n .
+	
+	eq #PrintTransition({(SL, PRCS, ME, PIDS), RULE}) 
+		= #PrintProcessEnv((SL, PRCS, ME, PIDS)) '\n .
+	
+	eq #PrintModelCheckResult(counterexample(TLIST1, TLIST2)) = 
+		#PrintTransitionList(TLIST1) '\n '\n 
+		'Zyklus: '\n '\n 
+		#PrintTransitionList(TLIST2) .
+	eq #PrintModelCheckResult(true) = 'proof 'succeeded. '\n .
+endfm

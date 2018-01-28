@@ -1,0 +1,95 @@
+***(
+
+	PID.MAUDE
+
+	The sort Pid defines the process identifier. It is modelled as an ordinary integer.
+	The 2nd module specifies sequences of process identifiers; they are used to store
+	the set of all existing processes, for example.
+	Accordingly, we define some helper-functions that deal with 
+	
+		* finding new (unused) PIDs for	new processes.
+		* inserting a new PID in a sequence of PIDS
+***)
+
+fmod SEM_PID is
+	protecting INT .
+	protecting MAUDE-SYNTAX-UP .
+	
+	sort Pid .
+	op pid : Int -> Pid [ctor] .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	op #up : Pid -> Term [memo] .
+	op #downPid : Term -> Pid [memo] .
+
+	var INT : Int .
+	var T : Term .
+
+	*** Meta-representing pids
+	eq #up(pid(INT)) = 'pid[#up(INT)] .
+	
+	*** Lowering the meta-representation level of pids
+	eq #downPid('pid[T]) = pid(#downInt(T)) .
+endfm
+
+fmod SEM_PID_SEQUENCE is
+	protecting SEM_PID .
+	protecting MAUDE-SYNTAX-UPDOWN .
+		
+	sort PidSequence .
+	subsort Pid < PidSequence .
+
+	op #empty-pid-seq : -> PidSequence [ctor] .
+	op _,_ : PidSequence PidSequence -> PidSequence [ctor assoc comm id: #empty-pid-seq] .
+
+	op #getNewPid : PidSequence -> Int .
+	op #getNewPid : PidSequence Int -> Int .
+	op #existsPid : PidSequence Int -> Bool [memo] .
+	op #insertPidUnique : PidSequence Int -> PidSequence .
+	
+	var PIDS : PidSequence .
+	vars I I1 I2 : Int .
+
+	eq #getNewPid(PIDS) = #getNewPid(PIDS, 0) .
+	eq #getNewPid(#empty-pid-seq, I) = I .
+	ceq #getNewPid(pid(I), I1) = I1
+		if (I < I1) .
+	ceq #getNewPid(pid(I), I1) = I + 1
+		if not (I < I1) .
+	ceq #getNewPid(pid(I), PIDS, I1) = #getNewPid(PIDS, I1)
+		if (I < I1) .
+	ceq #getNewPid(pid(I), PIDS, I1) = #getNewPid(PIDS, I2) 
+		if not( I < I1) 
+		/\ I2 := I + 1 .
+
+	eq #existsPid(#empty-pid-seq, I) = false .
+	eq #existsPid(pid(I), PIDS, I) = true .
+	eq #existsPid(PIDS, I) = false [owise] .
+
+	eq #insertPidUnique(pid(I), PIDS, I) = pid(I), PIDS .
+	eq #insertPidUnique(PIDS, I) = pid(I), PIDS [owise] .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	op #up : PidSequence -> Term [memo] .
+	op #downPidSequence : Term -> PidSequence [memo] .
+
+	var INT : Int .
+	vars T T1 T2 : Term .
+	var SUB : Substitution .
+	var PIDSEQ : PidSequence .
+	
+	*** Meta-representing pid sequences
+	eq #up(#empty-pid-seq) = '#empty-pid-seq.PidSequence .
+	ceq #up(pid(INT), PIDSEQ) = '_`,_[#up(pid(INT)), #up(PIDSEQ)]
+	  if PIDSEQ =/= #empty-pid-seq .
+	
+	*** Lowering the meta-representation level of pid sequences
+	eq #downPidSequence('#empty-pid-seq.PidSequence) = #empty-pid-seq .
+	ceq #downPidSequence(T) = #downPid(T1), #downPidSequence(T2) 
+		if SUB := metaMatch(GRAMMAR, '_`,_['P:Pid, 'PS:PidSequence], T, nil, 0)
+		/\ 'P:Pid <- T1 ; 'PS:PidSequence <- T2 := SUB .
+endfm

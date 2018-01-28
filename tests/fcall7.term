@@ -1,0 +1,14 @@
+debug reduce in SEM_EQUATIONS : 
+(sys-start, < tau | #no-res
+       | let var("Fun") = fun() -> int(2) in
+	     let var("test") = fun() -> apply var("Fun") () in
+	         apply var("test") ()
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | #empty-modenv >,
+#empty-modenv,
+pid(0))
+
+.

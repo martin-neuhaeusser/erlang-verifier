@@ -1,0 +1,138 @@
+(sys-start,#empty-processes,glob(atom("links"), atom("client") / int(0)) ==> fun() ->
+  receive
+    < {atom("setup_link"),var("Peer")} > when atom("true") ->
+      do
+        call atom("erlang") : atom("link") (var("Peer"))
+        apply atom("client") / int(0)()
+
+    < {atom("set_trapexit"),var("Bool")} > when atom("true") ->
+      do
+        call atom("erlang") : atom("process_flag") (atom("trap_exit"),var("Bool"))
+        apply atom("client") / int(0)()
+
+    < {atom("EXIT"),var("Pid"),var("Reason")} > when atom("true") ->
+      let var("_cor1") =
+        call atom("erlang") : atom("self") ()
+      in
+        do
+          call atom("io") : atom("format") (string("abc"),[var("_cor1") | [var("Pid") | [var("Reason") | []]]])
+          apply atom("client") / int(0)()
+
+
+
+    after int(5000) -> let var("_cor0") =
+      call atom("erlang") : atom("self") ()
+    in
+      call atom("io") : atom("format") (string("abc"),[var("_cor0") | []])
+
+,glob(atom("links"), atom("create_clients") / int(1)) ==> fun( var("_cor0") )->
+  case var("_cor0") of
+    < int(0) > when atom("true") ->
+      []
+    < var("Count") > when atom("true") ->
+      let var("_cor1") =
+        call atom("erlang") : atom("spawn") (atom("links"),atom("client"),[])
+      in
+        let var("_cor2") =
+          call atom("erlang") : atom("-") (var("Count"),int(1))
+        in
+          let var("_cor3") =
+            apply atom("create_clients") / int(1)(var("_cor2"))
+          in
+            [var("_cor1") | var("_cor3")]
+
+  end
+
+,glob(atom("links"), atom("link_client") / int(2)) ==> fun( var("_cor1"),var("_cor0") )->
+  case < var("_cor1"),var("_cor0") > of
+    < var("C1"),[] > when atom("true") ->
+      atom("true")
+    < var("C1"),[var("C2") | var("Cs")] > when atom("true") ->
+      do
+        call atom("erlang") : atom("!") (var("C1"),{atom("setup_link"),var("C2")})
+        apply atom("link_client") / int(2)(var("C1"),var("Cs"))
+
+    < var("_cor3"),var("_cor2") > when atom("true") ->
+      primop atom("match_fail")({atom("function_clause"),var("_cor3"),var("_cor2")})
+
+
+
+  end
+
+,glob(atom("links"), atom("link_clients") / int(1)) ==> fun( var("_cor0") )->
+  case var("_cor0") of
+    < [] > when atom("true") ->
+      atom("true")
+    < [var("C") | var("Cs")] > when atom("true") ->
+      do
+        apply atom("link_client") / int(2)(var("C"),var("Cs"))
+        apply atom("link_clients") / int(1)(var("Cs"))
+
+    < var("_cor1") > when atom("true") ->
+      primop atom("match_fail")({atom("function_clause"),var("_cor1")})
+
+
+
+  end
+
+,glob(atom("links"), atom("module_info") / int(0)) ==> fun() ->
+  call atom("erlang") : atom("get_module_info") (atom("links"))
+,glob(atom("links"), atom("module_info") / int(1)) ==> fun( var("_cor0") )->
+  call atom("erlang") : atom("get_module_info") (atom("links"),var("_cor0"))
+,glob(atom("links"), atom("observe_clients") / int(2)) ==> fun( var("_cor1"),var("_cor0") )->
+  case < var("_cor1"),var("_cor0") > of
+    < var("Obs"),[] > when atom("true") ->
+      atom("true")
+    < var("Obs"),[var("C") | var("Cs")] > when atom("true") ->
+      do
+        call atom("erlang") : atom("!") (var("Obs"),{atom("observe"),var("C")})
+        apply atom("observe_clients") / int(2)(var("Obs"),var("Cs"))
+
+    < var("_cor3"),var("_cor2") > when atom("true") ->
+      primop atom("match_fail")({atom("function_clause"),var("_cor3"),var("_cor2")})
+
+
+
+  end
+
+,glob(atom("links"), atom("observer") / int(0)) ==> fun() ->
+  do
+    call atom("erlang") : atom("process_flag") (atom("trap_exit"),atom("true"))
+    receive
+      < {atom("observe"),var("ClientPid")} > when atom("true") ->
+        do
+          call atom("erlang") : atom("link") (var("ClientPid"))
+          apply atom("observer") / int(0)()
+
+      < {atom("EXIT"),var("Pid"),var("Reason")} > when atom("true") ->
+        do
+          call atom("io") : atom("format") (string("abc"),[var("Pid") | [var("Reason") | []]])
+          apply atom("observer") / int(0)()
+
+
+      after int(10000) -> call atom("io") : atom("format") (string("abc"))
+
+
+,glob(atom("links"), atom("start") / int(1)) ==> fun( var("_cor0") )->
+  let var("ClientList") =
+    apply atom("create_clients") / int(1)(int(4))
+  in
+    do
+      call atom("io") : atom("format") (string("abc"),[var("ClientList") | []])
+      do
+        apply atom("link_clients") / int(1)(var("ClientList"))
+        let var("Obs") =
+          call atom("erlang") : atom("spawn") (atom("links"),atom("observer"),[])
+        in
+          do
+            apply atom("observe_clients") / int(2)(var("Obs"),var("ClientList"))
+            let var("_cor3") =
+              call atom("erlang") : atom("hd") (var("ClientList"))
+            in
+              do
+                call atom("io") : atom("format") (string("abc"),[var("_cor3") | [var("_cor0") | []]])
+                let var("_cor4") =
+                  call atom("erlang") : atom("hd") (var("ClientList"))
+                in
+                  call atom("erlang") : atom("exit") (var("_cor4"),var("_cor0"))
+,pid(0))

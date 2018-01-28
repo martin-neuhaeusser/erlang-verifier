@@ -1,0 +1,220 @@
+(add-module(( module 'links' ['client' / 0,
+ 		'module_info' / 0,
+ 		'module_info' / 1,
+ 		'observer' / 0,
+ 		'start' / 1]
+     attributes []
+( 'observer' / 0 =
+     
+     fun () -> 
+ 	do  
+ 	    call 'erlang' : 'process_flag'
+ 		('trap_exit', 'true')
+ 	    
+ 	    receive
+ 	      
+ 	       < {'observe',Sender,ClientPid} >  when 'true' -> 
+ 		  do  
+ 		      call 'erlang' : 'link'
+ 			  (ClientPid)
+ 		      let  < _cor0 >  =
+ 			  
+ 			  call 'erlang' : 'self'
+ 			      ()
+ 		      in  do  
+ 			      call 'erlang' : '!'
+ 				  (Sender, {'ack',_cor0})
+ 			      
+ 			      apply 'observer' / 0
+ 				  ()
+ 	      
+ 	       < {'EXIT',Pid,Reason} >  when 'true' -> 
+ 		  do  
+ 		      call 'io' : 'format'
+ 			  ("abc", [Pid | [Reason | []]])
+ 		      
+ 		      apply 'observer' / 0
+ 			  ()
+ 	    after 'infinity' -> 
+ 	      'true')
+( 'client' / 0 =
+     
+     fun () -> 
+ 	
+ 	receive
+ 	  
+ 	   < {'setup_link',Sender,Peer} >  when 'true' -> 
+ 	      do  
+ 		  call 'erlang' : 'link'
+ 		      (Peer)
+ 		  let  < _cor0 >  =
+ 		      
+ 		      call 'erlang' : 'self'
+ 			  ()
+ 		  in  do  
+ 			  call 'erlang' : '!'
+ 			      (Sender, {'ack',_cor0})
+ 			  
+ 			  apply 'client' / 0
+ 			      ()
+ 	  
+ 	   < {'EXIT',Pid,Reason} >  when 'true' -> 
+ 	      let  < _cor1 >  =
+ 		  
+ 		  call 'erlang' : 'self'
+ 		      ()
+ 	      in  do  
+ 		      call 'io' : 'format'
+ 			  ("abc", [_cor1 | [Pid | [Reason | []]]])
+ 		      
+ 		      apply 'client' / 0
+ 			  ()
+ 	after 'infinity' -> 
+ 	  'true')
+( 'create_clients' / 1 =
+     
+     fun (_cor0) -> 
+ 	case _cor0 of
+ 	   < 0 >  when 'true' -> 
+ 	      []
+ 	  
+ 	   < Count >  when 'true' -> 
+ 	      let  < _cor1 >  =
+ 		  
+ 		  call 'erlang' : 'spawn'
+ 		      ('links', 'client', [])
+ 	      in  let  < _cor2 >  =
+ 		      
+ 		      call 'erlang' : '-'
+ 			  (Count, 1)
+ 		  in  let  < _cor3 >  =
+ 			  
+ 			  apply 'create_clients' / 1
+ 			      (_cor2)
+ 		      in  
+ 			  [_cor1 | _cor3]
+ 	end)
+( 'link_clients' / 1 =
+     
+     fun (_cor0) -> 
+ 	case _cor0 of
+ 	   < [] >  when 'true' -> 
+ 	      'true'
+ 	  
+ 	   < [C | Cs] >  when 'true' -> 
+ 	      do  
+ 		  apply 'link_client' / 2
+ 		      (C, Cs)
+ 		  
+ 		  apply 'link_clients' / 1
+ 		      (Cs)
+ 	  (  < _cor1 >  when 'true' -> 
+ 		primop 'match_fail'
+ 		    ({'function_clause',_cor1})
+ 	      )
+ 	end)
+( 'link_client' / 2 =
+     
+     fun (_cor1,_cor0) -> 
+ 	case  < _cor1,_cor0 >  of
+ 	   < C1,[] >  when 'true' -> 
+ 	      'true'
+ 	  
+ 	   < C1,[C2 | Cs] >  when 'true' -> 
+ 	      let  < _cor2 >  =
+ 		  
+ 		  call 'erlang' : 'self'
+ 		      ()
+ 	      in  do  
+ 		      call 'erlang' : '!'
+ 			  (C1, {'setup_link',_cor2,C2})
+ 		      
+ 		      receive
+ 			
+ 			 < {'ack',_cor5} >  when call 'erlang' : '=:='
+ 						 (_cor5,
+ 						  C1) -> 
+ 			    apply 'link_client' / 2
+ 				(C1, Cs)
+ 		      after 'infinity' -> 
+ 			'true'
+ 	  (  < _cor4,_cor3 >  when 'true' -> 
+ 		primop 'match_fail'
+ 		    ({'function_clause',_cor4,_cor3})
+ 	      )
+ 	end)
+( 'observe_clients' / 2 =
+     
+     fun (_cor1,_cor0) -> 
+ 	case  < _cor1,_cor0 >  of
+ 	   < Obs,[] >  when 'true' -> 
+ 	      'true'
+ 	  
+ 	   < Obs,[C | Cs] >  when 'true' -> 
+ 	      let  < _cor2 >  =
+ 		  
+ 		  call 'erlang' : 'self'
+ 		      ()
+ 	      in  do  
+ 		      call 'erlang' : '!'
+ 			  (Obs, {'observe',_cor2,C})
+ 		      
+ 		      receive
+ 			
+ 			 < {'ack',_cor5} >  when call 'erlang' : '=:='
+ 						 (_cor5,
+ 						  Obs) -> 
+ 			    apply 'observe_clients' / 2
+ 				(Obs, Cs)
+ 		      after 'infinity' -> 
+ 			'true'
+ 	  (  < _cor4,_cor3 >  when 'true' -> 
+ 		primop 'match_fail'
+ 		    ({'function_clause',_cor4,_cor3})
+ 	      )
+ 	end)
+( 'start' / 1 =
+     
+     fun (_cor0) -> 
+ 	let  < 
+ 	     ClientList >  =
+ 	    
+ 	    apply 'create_clients' / 1
+ 		(4)
+ 	in  do  
+ 		call 'io' : 'format'
+ 		    ("abc", [ClientList | []])
+ 		do  
+ 		    apply 'link_clients' / 1
+ 			(ClientList)
+ 		    let  < 
+ 			 Obs >  =
+ 			
+ 			call 'erlang' : 'spawn'
+ 			    ('links', 'observer', [])
+ 		    in  do  
+ 			    apply 'observe_clients' / 2
+ 				(Obs, ClientList)
+ 			    let  < _cor3 >  =
+ 				
+ 				call 'erlang' : 'hd'
+ 				    (ClientList)
+ 			    in  do  
+ 				    call 'io' : 'format'
+ 					("abc", [_cor3 | [_cor0 | []]])
+ 				    let  < _cor4 >  =
+ 					
+ 					call 'erlang' : 'hd'
+ 					    (ClientList)
+ 				    in  
+ 					call 'erlang' : 'exit'
+ 					    (_cor4, _cor0))
+( 'module_info' / 0 =
+     fun () -> 
+ 	call 'erlang' : 'get_module_info'
+ 	    ('links'))
+( 'module_info' / 1 =
+     fun (_cor0) -> 
+ 	call 'erlang' : 'get_module_info'
+ 	    ('links', _cor0))
+ end)))

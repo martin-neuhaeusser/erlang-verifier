@@ -1,0 +1,91 @@
+(add-module((module 'token' ['module_info' / 0,
+		'module_info' / 1,
+		'start' / 0,
+		'start_station' / 1]
+    attributes []
+('station' / 2 =
+        fun (_cor1,_cor0) -> 
+		receive
+	  	   < {'token',_cor6} >  when call 'erlang' : '=:='
+				     (_cor6,
+				      _cor1) -> 
+	      let  < _cor2 >  =
+		  		  call 'erlang' : 'self'
+		      ()
+	      in  do  		      call 'io' : 'format'
+			  ('take', [_cor2 | [_cor1 | []]])
+		      do  			  call 'erlang' : '!'
+			      (_cor0, {'token',_cor1})
+			  			  apply 'station' / 2
+			      (_cor1, _cor0)
+	  	   < {'token',CritSec} >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  call 'erlang' : 'self'
+		      ()
+	      in  do  		      call 'io' : 'format'
+			  ('pass', [_cor3 | [_cor1 | []]])
+		      do  			  call 'erlang' : '!'
+			      (_cor0, {'token',CritSec})
+			  			  apply 'station' / 2
+			      (_cor1, _cor0)
+	after 'infinity' -> 
+	  'true')
+('start_station' / 1 =
+        fun (_cor0) -> 
+		receive
+	  	   < {'init',Next} >  when 'true' -> 
+	      apply 'station' / 2
+		  (_cor0, Next)
+	after 'infinity' -> 
+	  'true')
+('create_tokens' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < Head,0 >  when 'true' -> 
+	      	      call 'erlang' : '!'
+		  (Head, {'token',0})
+	  	   < Head,Num >  when call 'erlang' : '>'
+			      (Num,
+			       0) -> 
+	      do  		  call 'erlang' : '!'
+		      (Head, {'token',Num})
+		  let  < _cor2 >  =
+		      		      call 'erlang' : '-'
+			  (Num, 1)
+		  in  		      apply 'create_tokens' / 2
+			  (Head, _cor2)
+	   < _cor4,_cor3 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor4,_cor3})
+	end)
+('start' / 0 =
+        fun () -> 
+	let  < _cor0 >  =
+	    	    call 'erlang' : 'self'
+		()
+	in  do  		apply 'create_tokens' / 2
+		    (_cor0, 2)
+		let  < 		     Station1 >  =
+		    		    call 'erlang' : 'spawn'
+			('token', 'start_station', [1])
+		in  let  < 			 Station2 >  =
+						call 'erlang' : 'spawn'
+			    ('token', 'start_station', [2])
+		    in  do  			    call 'erlang' : '!'
+				(Station1, {'init',Station2})
+			    let  < _cor3 >  =
+								call 'erlang' : 'self'
+				    ()
+			    in  do  				    call 'erlang' : '!'
+					(Station2, {'init',_cor3})
+				    				    apply 'station' / 2
+					(0, Station1))
+('module_info' / 0 =
+    fun () -> 
+	call 'erlang' : 'get_module_info'
+	    ('token'))
+('module_info' / 1 =
+    fun (_cor0) -> 
+	call 'erlang' : 'get_module_info'
+	    ('token', _cor0))
+end)))

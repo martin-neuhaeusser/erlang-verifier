@@ -1,0 +1,53 @@
+***(
+
+	MAILBOX.MAUDE
+
+	The mailbox is a (possibly empty) ordered list of messages. A running process can receive
+	a message from another process. The message is then appended to the recipient's mailbox.
+	Whenever a process tries to receive a message, his mailbox is searched (in FIFO order, i.e.
+	the oldest messages are checked first) for a message that matches a pattern in the receive 
+	clause.
+
+***)
+
+fmod SEM_MAILBOX is
+	protecting SYNTAX .
+	protecting MAUDE-SYNTAX-UPDOWN .
+
+	sort Mailbox .
+	subsort Const < Mailbox .
+
+	*** In order to simplify concatenation of mailboxes and to reduce the number of cases
+	*** we have to consider (for example in the specification of how messages are received),
+	*** we declare the mailbox as a list of constants that is associative and has #empty-mbox 
+	*** as an identity element.
+	*** Therefore we only have to consider the cases of the empty mailbox or the case of 
+	*** a mailbox with at least two elements: If there is only one element in the mailbox,
+	*** Maude automatically appends the identity element.
+	*** Note: This is important in the understanding of the matching code for mailboxes
+	***       in the functional module SEM_MATCH_MAILBOX.
+	op #empty-mbox : -> Mailbox [ctor] .
+	op _:_ : Mailbox Mailbox -> Mailbox [ctor prec 60 assoc id: #empty-mbox] .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	op #up : Mailbox -> Term [memo] .
+	op #downMailbox : Term -> Mailbox [memo] .
+
+	var MBOX : Mailbox .
+	var C : Const .
+	var SUB : Substitution .
+	vars T T1 T2 : Term .
+	
+	*** Implementation of the meta-representation part
+	eq #up(#empty-mbox) = '#empty-mbox.Mailbox .
+	ceq #up(C : MBOX) = '_:_[#up(C), #up(MBOX)] 
+		if MBOX =/= #empty-mbox .
+
+	*** Lowering the meta-representation level of expression level labels
+	eq #downMailbox('#empty-mbox.Mailbox) = #empty-mbox .
+	ceq #downMailbox(T) = #downExpr(T1) : #downMailbox(T2) 
+		if SUB := metaMatch(GRAMMAR, '_:_['C:Const, 'MBOX:Mailbox], T, nil, 0)
+		/\ 'C:Const <- T1 ; 'MBOX:Mailbox <- T2 := SUB .
+endfm

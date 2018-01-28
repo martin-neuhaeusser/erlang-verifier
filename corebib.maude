@@ -1,0 +1,525 @@
+***(
+
+	COREBIB.MAUDE
+	
+	This file contains the functional module SEM_COREBIB that is part
+	of the equational theory and specifies the semantics of the most
+	important functions of Core-Erlang's standard library.
+	
+	Note: Many of these functions yield a side-effect during evaluation!
+	      As soon as a side-effect occurs, the corresponding process term
+	      reaches normal form with respect to the equational theory.
+	      Therefore, to fully capture the semantics, one has to consider
+	      the corresponding rewrite rules (which can be found in the module
+	      SEM_TRANSITIONS).
+
+	Additionally, a subset of the functions that are defined in the built-in
+	module lists is implemented in the SEM_LISTBIB module. The built-in
+	functions for appending lists and checking membership in a list are
+	specified there.
+	
+	The third functional module contained in this file is called "SEM_IOBIB".
+	It encapsulated some of the output functions of Core-Erlang's IO library.
+	These functions always succeed and the output is discarded.
+***)
+
+fmod SEM_LIST_HELPER is
+	protecting INT .
+	protecting BOOL .
+	protecting SYNTAX .
+	protecting SEM_LIST_NORMALFORM .
+		
+	*** the #listSubtract function takes two lists as arguments and removes the
+	*** first occurrence of the elements of the 2nd list from the first list
+	op #listSubtract : ListConst ListConst -> ListConst .
+	
+	*** the overloaded function #listSubtractElement removes the first occurrence
+	*** of the constant value supplied as 2nd argument from the list. It is needed
+	*** to implement the above version dealing with two lists.
+	op #listSubtractElement : ListConst Const -> ListConst .
+	
+	*** #listConcat takes two constant lists as arguments and returns the
+	*** list that results from concatenating them.
+	op #listConcat : ListConst ListConst -> ListConst .
+	
+	*** the boolean function #listMember checks if the constant in the first
+	*** argument is a member of the list given in the 2nd argument.
+	op #listMember : Const ListConst -> Bool .
+
+	*** the boolean function #listMember checks if the constant in the first
+	*** argument is a member of the list given in the 2nd argument.
+	op #listLength : ListConst -> Int .
+	
+	vars LIST LIST1 : ListConst .
+	vars C C1 : Const .
+	
+	eq #listSubtractElement([], C) = [] .
+	eq #listSubtractElement([C | LIST], C) = LIST .
+	eq #listSubtractElement([C | LIST], C1) = [C | #listSubtractElement(LIST, C1)] [owise] .
+	
+	eq #listSubtract([], LIST) = [] .
+	eq #listSubtract(LIST, []) = LIST .
+	eq #listSubtract(LIST, [C | LIST1]) = #listSubtract(#listSubtractElement(LIST, C), LIST1) .
+	
+	eq #listConcat([], LIST) = LIST .
+	eq #listConcat(LIST, []) = LIST .
+	eq #listConcat(LIST, LIST1) = [#getListElements(LIST), #getListElements(LIST1)] .
+	
+	eq #listMember(C, []) = false .
+	eq #listMember(C, [C | LIST]) = true .
+	eq #listMember(C, [C1 | LIST]) = #listMember(C, LIST) [owise] .
+	
+	eq #listLength([]) = 0 .
+	eq #listLength([ C | LIST]) = 1 + #listLength(LIST) .
+endfm	
+	
+	
+	
+		
+fmod SEM_COREBIB is
+	protecting BOOL .
+	protecting NAT .
+	protecting STRING .
+	protecting SEM_PROCESS .
+	protecting SEM_LIST_HELPER .
+	
+	vars C1 C2 : Value .
+	vars INT INT1 : Int .
+	vars CLIST CLIST1 CLIST2 : NeConstList .
+	vars LIST LIST1 LIST2 : ListConst .
+	vars A A1 A2 : Atom .
+	var C : Const .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+	var BOOL : Bool .
+	
+	
+	*** spawn statement 
+	*** Evaluating the spawn statements yields a new process that instantly begins to
+	*** evaluate the function given in the arguments to the spawn statement. 
+	*** Note: We cannot calculate the (new) process identifier for the process that is created
+	***       within the equational theory: The set of currently used process identifiers 
+	***	  belongs to the system level (rewrite rules from SEM_TRANSITION)!
+	***       Therefore we have a bidirectional communication: We indicate the occurrence of
+	***	  a side-effect by changing the process's label first:
+	eq [core-spawn] :
+	   < tau | #no-res | call atom("erlang") : atom("spawn") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < spawn(A1,A2,LIST) | #no-res | call atom("erlang") : atom("spawn") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** On the system level (see the rewrite-rules labelled with "sys-spawn"), we look up a new (unused)
+	*** process identifier and propagate it back using the second communication channel (2nd component
+	*** of the process tuple). The new PID thus provided is the result of the evaluation of the
+	*** spawn function call.
+	eq [core-spawn] :
+	   < tau | #res-spawn(INT) | call atom("erlang") : atom("spawn") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | int(INT) | PID | MBOX | LINKS | TRAP | ME > .
+	    	
+
+	
+		       
+	*** spawn_link statement 
+	*** The spawn_link function is an extension of the spawn system call: It creates a new process
+	*** and atomically links the "old" and "new" processes.
+	*** The "communication" between the level of the equational theory and the rewriting level
+	*** works as above.
+	eq [core-spawnlink] :
+	   < tau | #no-res | call atom("erlang") : atom("spawn_link") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > =
+           < spawn-link(A1,A2,LIST) | #no-res | call atom("erlang") : atom("spawn_link") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > .
+
+	eq [core-spawnlink] :
+	   < tau | #res-spawn(INT) | call atom("erlang") : atom("spawn_link") (A1,A2,LIST) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | int(INT) | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	
+	
+	
+	
+	*** =:= operator 
+	*** syntactic equality after evaluation of both arguments, cf. Concurrent Programming in ERLANG, pp. 29
+	ceq [core-syneq] :
+	    < tau | #no-res | call atom("erlang") : atom("=:=") (C1, C2) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (C1 == C2) 
+	    	    	then atom("true") 
+			else atom("false") 
+		    fi .
+
+		    	       
+	       
+	       
+	*** built in "+" operator for integer numbers
+	eq [core-plus] :
+	   < tau | #no-res | call atom("erlang") : atom("+") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | int(INT + INT1) | PID | MBOX | LINKS | TRAP | ME > .
+
+	 	 
+
+		 	 
+	*** built in "-" operator for integer numbers
+	eq [core-minus] :
+	   < tau | #no-res | call atom("erlang") : atom("-") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | int(INT + (- INT1)) | PID | MBOX | LINKS | TRAP | ME > .
+
+	 	 
+
+		 	 
+	*** built in "*" operator for integer numbers
+	eq [core-mul] :
+	   < tau | #no-res | call atom("erlang") : atom("*") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | int(INT * INT1) | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	
+	
+	
+	*** built in "==" operator for integer numbers
+	ceq [core-equal] :
+	    < tau | #no-res | call atom("erlang") : atom("==") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME > 
+	    if A := if (INT == INT1)
+	    	   	then atom("true")
+		   	else atom("false")
+	    fi .
+	   
+	
+	
+	
+	*** built in "<" operator for integer numbers
+	ceq [core-less] :
+	    < tau | #no-res | call atom("erlang") : atom("<") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME > 
+	    if A := if (INT < INT1)
+		    	then atom("true")
+	  		else atom("false")
+	    	    fi .
+
+
+		    
+		    	    
+	*** built in "=<" operator for integer numbers
+	ceq [core-le] :
+	    < tau | #no-res | call atom("erlang") : atom("=<") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (INT <= INT1)
+	    	    	then atom("true")
+		        else atom("false")
+	    	    fi .
+
+	    
+	    	    
+	   
+	*** built in ">" operator for integer numbers
+	ceq [core-greater] :
+	   < tau | #no-res | call atom("erlang") : atom(">") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME > 
+	   if A := if (INT > INT1)
+	   	   	then atom("true")
+			else atom("false")
+	   	   fi .
+
+	   
+	   
+	   
+	*** built in ">=" operator for integer numbers
+	ceq [core-ge] :
+	    < tau | #no-res | call atom("erlang") : atom(">=") (int(INT), int(INT1)) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (INT >= INT1)
+	    	    	then atom("true")
+		        else atom("false")
+	    	    fi .
+
+	    
+		    
+
+	*** As we do not model floating point numbers, we do not deal with division here either.
+
+	
+	
+	
+	*** built-in boolean operators
+	*** Note: We assume that the only arguments supplied to these boolean functions are 
+	***       the atoms 'true' and 'false'. If other atoms were given, this would not
+	***	  be detected.
+	ceq [core-and] :
+	    < tau | #no-res | call atom("erlang") : atom("and") (A1, A2) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (A1 == atom("true") and A2 == atom("true"))
+	    	    	then atom("true")
+		        else atom("false")
+	    	    fi .
+	
+	ceq [core-or] :
+	    < tau | #no-res | call atom("erlang") : atom("or") (A1, A2) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (A1 == atom("true") or A2 == atom("true"))
+	    	    	then atom("true")
+		        else atom("false")
+	    	    fi .	
+
+    	ceq [core-not] :
+	    < tau | #no-res | call atom("erlang") : atom("not") (A1) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME >
+	    if A := if (A1 == atom("true"))
+	    	    	then atom("false")
+		        else atom("true")
+	    	    fi .	
+	
+	
+	
+		
+	*** self statement
+	*** This function returns the process's identifier as an Core-Erlang integer.
+	eq [core-self] :
+	   < tau | #no-res | call atom("erlang") : atom("self") () | pid(INT) | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | int(INT) | pid(INT) | MBOX | LINKS | TRAP | ME > .
+
+	   
+	   
+	   	
+	*** send statement
+	*** Evaluating the standard-library function 'erlang':'!' results in passing the
+	*** specified constant (the message) to the mailbox of the process that is specified by the 
+	*** PID in the first argument.
+	*** Note: Sending of messages to another process is obviously a side-effect. Therefore
+	***       we have to stop the normalisation within the equational theory and indicate the
+	***	  side-effect to the rewrite-rules of the system level (see the rewrite rules
+	***	  labelled "sys-send" in the module SEM_TRANSITION for the rewriting part of
+	***       the send semantics).  
+	eq [core-send] :
+	   < tau | #no-res | call atom("erlang") : atom("!") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < pid(INT) ! C | #no-res | call atom("erlang") : atom("!") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The send operation is "performed" on the system level (i.e. the message is appended to
+	*** the mailbox of the receiving process). If the receiving process exists, success is
+	*** signalled back in the second communication channel:
+	eq [core-send] :
+	   < tau | #res-send(true) | call atom("erlang") : atom("!") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | C | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	*** If the receiver specified in the send statement does not belong to an existing process,
+	*** the rewrite-rules indicate the failure by setting the returned flag to false. 
+	*** This is when the evaluation of the send-function call aborts with an exception:
+	eq [core-send] :
+	   < tau | #res-send(false) | call atom("erlang") : atom("!") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | primop atom("raise") (atom("error"), {atom("noproc"), [int(INT),C]}) | PID | MBOX | LINKS | TRAP | ME > .
+	    
+	       	    	
+
+	    
+	*** exit-statement
+	*** Evaluating the exit-function stops the process. The supplied argument is the
+	*** reason-value that is propagated with the exit-signals.
+	*** Note: We use the raise primitive operation to create exceptions. It indicates
+	***       the error-condition and sets the process's expression to 'bottom' to
+	***       indicate that it is undefined.
+	eq [core-exit] :
+	   < tau | #no-res | call atom("erlang") : atom("exit") (C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | primop atom("raise") (atom("exit"), C) | PID | MBOX | LINKS | TRAP | ME > .
+
+	   
+	   
+	   
+	*** exit-statement (remote version)
+	*** Apart from the "local" exit function specified above, there is a "remote"-version that
+	*** allows sending of exit signals to other processes. It does not terminate the process
+	*** which is evaluating the exit-function, but yields a side-effect according to the
+	*** receiver's PID and exit-value.
+	*** Sending of signals to other processes is a side-effect; therefore we have to model
+	*** the "communication" between the equational theory and the system level here:
+	*** Note: In any case, evaluation of this exit-statement yields 'true' as the result value.
+	eq [core-exit] :
+	   < tau | #no-res | call atom("erlang") : atom("exit") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < send-signal(pid(INT), C) | #no-res | call atom("erlang") : atom("exit") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > .
+	
+	eq [core-exit] :
+	   < tau | #res-signal(BOOL) | call atom("erlang") : atom("exit") (int(INT), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("true") | PID | MBOX | LINKS | TRAP | ME > .
+	   
+
+	   
+	   	   	   
+	*** throw-statement
+	*** The throw-statement can be used to create user-defined exceptions. The argument
+	*** to the throw-function call is the exception-value.
+	eq [core-throw] :
+	   < tau | #no-res | call atom("erlang") : atom("throw") (C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | primop atom("raise") (atom("throw"), C) | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	   
+	   
+	   
+	*** error-statement
+	*** The built-in function 'error' causes abnormal process termination. 
+	eq [core-throw] :
+	   < tau | #no-res | call atom("erlang") : atom("error") (C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | primop atom("raise") (atom("error"), C) | PID | MBOX | LINKS | TRAP | ME > .
+
+	   	   
+		       
+	*** the link statement
+	*** Establishment of links between processes. Again, linking processes is a side-effect that
+	*** has to take place on the transition level. We provide the interface and communicate the
+	*** results as before:
+	eq [core-link] :
+	   < tau | #no-res | call atom("erlang") : atom("link") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < link(pid(INT)) | #no-res | call atom("erlang") : atom("link") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > .
+        
+	*** If the link is established successfully by the corresponding rewrite-rules, this is indicated
+	*** by the positive flag #res-link(true):
+	eq [core-link] :
+	   < tau | #res-link(true) | call atom("erlang") : atom("link") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("true") | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** If the link-partner does not exist, we get a negative result and throw a corresponding exception.
+	eq [core-link] :
+	   < tau | #res-link(false) | call atom("erlang") : atom("link") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | primop atom("raise") (atom("error"), {atom("noproc"), [int(INT)]}) | PID | MBOX | LINKS | TRAP | ME > .
+	   	
+	 	 
+
+		 
+	*** the unlink statement 
+	*** Deletion of a previously created link between the calling process and another process
+	eq [core-unlink] :
+	   < tau | #no-res | call atom("erlang") : atom("unlink") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < unlink(pid(INT)) | #no-res | call atom("erlang") : atom("unlink") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > .
+
+  	*** The process id specified in the argument is invalid (i.e. no such process exists). Hence we ignore the
+	*** call and return true.
+	eq [core-unlink] :
+	   < tau | #res-link(true) | call atom("erlang") : atom("unlink") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("true") | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** If the process is not linked with the argument PID, we ignore the call 
+	eq [core-unlink] :
+	   < tau | #res-link(false) | call atom("erlang") : atom("unlink") (int(INT)) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("true") | PID | MBOX | LINKS | TRAP | ME > .
+         	
+	
+	
+		
+       	*** process flag
+	*** We only model the "trap_exit" process flag that indicates whether the process is terminated
+	*** if it receives an exit-signal or whether it receives a message containing a "description" of the signal:
+	*** Note: There are different approaches here: If one was interested in observing modifications of 
+	***       the trap_exit flag, one could as well introduce a switch to the transition level here.
+	ceq [core-processflag] :
+	    < tau | #no-res | call atom("erlang") : atom("process_flag") (atom("trap_exit"), A) | PID | MBOX | LINKS | TRAP | ME > =
+	    < trapexit(A) | #no-res | atom("true") | PID | MBOX | LINKS | TRAP | ME > 
+	    if (A == atom("true") or A == atom("false")) .
+	    
+  	eq [core-processflag] :
+	   < tau | #no-res | call atom("erlang") : atom("process_flag") (atom("trap_exit"), A) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | primop atom("raise") (atom("error"), atom("badarg")) | PID | MBOX | LINKS | TRAP | ME > [owise] .
+	   
+
+
+	   	   	   
+	*** Some list processing functions that are currently implemented in the 'erlang' standard library.
+	*** tuple_to_list: This function converts a tuple to the corresponding list.
+	eq [core-tupletolist] : 
+	   < tau | #no-res | call atom("erlang") : atom("tuple_to_list") ({CLIST}) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | [CLIST] | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The 'erlang':'++' function concatenates the two lists given in the arguments.
+	eq [core-list++] : 
+	   < tau | #no-res | call atom("erlang") : atom("++") (LIST1, LIST2) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | #listConcat(LIST1, LIST2) | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** The 'erlang':'--' function subtracts the elements of the 2nd list from the first list.
+	*** Only one occurrence (the first) is removed for each element of the 2nd list.
+	eq [core-list--] : 
+	   < tau | #no-res | call atom("erlang") : atom("--") (LIST1, LIST2) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | #listSubtract(LIST1,LIST2) | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** The 'erlang':'hd' function returns the head element of the given list
+	eq [core-list-head] : 
+	   < tau | #no-res | call atom("erlang") : atom("hd") ([C | LIST1]) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | C | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The 'erlang':'tl' function returns the list that was specified in the argument with
+	*** the head element stripped off.
+	eq [core-list-tail] :
+	   < tau | #no-res | call atom("erlang") : atom("tl") ([C | LIST1]) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | LIST1 | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The 'erlang':'length' function returns the length of the list
+	eq [core-list-length] : 
+	   < tau | #no-res | call atom("erlang") : atom("length") (LIST1) | PID | MBOX | LINKS | TRAP | ME > =
+           < tau | #no-res | int(#listLength(LIST1)) | PID | MBOX | LINKS | TRAP | ME > .
+endfm
+
+
+
+
+fmod SEM_LISTBIB is
+	protecting SEM_PROCESS .
+	protecting SEM_LIST_HELPER .
+	
+	var C : Const .
+	vars LIST LIST1 LIST2 : ListConst .
+	var CLIST : NeConstList .
+	var A : Atom .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+
+	*** the append function appends the two lists given as its arguments.
+	eq [lists-append] :
+	   < tau | #no-res | call atom("lists") : atom("append") (LIST1, LIST2) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | #listConcat(LIST1, LIST2) | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** the delete function deletes the first occurrence of the value given in the 1st argument
+	*** from the list that is supplied in the 2nd argument.
+	eq [lists-delete] :
+	   < tau | #no-res | call atom("lists") : atom("delete") (C, LIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | #listSubtractElement(LIST, C) | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	*** the member function simply checks if the specified constant is an element of the
+	*** list that is given as the 2nd argument. 
+	ceq [lists-member] : 
+	    < tau | #no-res | call atom("lists") : atom("member") (C, LIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | A | PID | MBOX | LINKS | TRAP | ME > 
+		if A := if #listMember(C, LIST)
+				then atom("true")
+				else atom("false")
+			fi .
+endfm
+
+
+
+
+fmod SEM_IOBIB is
+	protecting SEM_PROCESS .
+	protecting SEM_LIST_HELPER .
+	
+	var CLIST : NeConstList .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+	
+	*** Some output functions of the io-library:
+	*** They always succeed and their output is discarded.
+	eq [io-format] :
+	   < tau | #no-res | call atom("io") : atom("format") (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("ok") | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	eq [io-write] : 
+	   < tau | #no-res | call atom("io") : atom("write") (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("ok") | PID | MBOX | LINKS | TRAP | ME > .
+
+	eq [io-nl] :
+	   < tau | #no-res | call atom("io") : atom("nl") (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("ok") | PID | MBOX | LINKS | TRAP | ME > .
+	 
+	eq [io-putchars] :
+	   < tau | #no-res | call atom("io") : atom("put_chars") (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | atom("ok") | PID | MBOX | LINKS | TRAP | ME > . 
+endfm

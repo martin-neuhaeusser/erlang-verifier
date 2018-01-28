@@ -1,0 +1,12 @@
+set trace substitution off .
+debug reduce in THEORY : 
+(sys-start, < tau | #no-res
+       | let var("Fun") = fun(var("X"), var("Y")) -> 
+                 call atom("erlang") : atom("+") (var("X"), var("Y")) in
+	     apply var("Fun") (int(1),int(1))
+	| pid(0) 
+	| #empty-mbox 
+	| #empty-pid-seq 
+	| false 
+	| #empty-modenv >, 
+#empty-modenv, pid(0)) .

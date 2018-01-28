@@ -1,0 +1,74 @@
+print conceal (_==>_) .
+set print conceal on .
+
+search in THEORY : 
+(sys-start, < tau 
+   | #no-res 
+   | call atom("locker2") : atom("start") () 
+   | pid(0)
+   | #empty-mbox 
+   | #empty-pid-seq 
+   | false 
+   | 
+(glob(atom("locker2"), atom("client") / int(1)) ==> (fun(var("_cor0"))->
+  let < var("Pid") > =
+    call atom("erlang") : atom("self") () in do
+      call atom("erlang") : atom("!") (var("_cor0"),{atom("req"),var("Pid")})
+      do
+        receive
+          < atom("ok") > when atom("true") ->
+            call atom("erlang") : atom("!") (var("_cor0"),{atom("rel"),var("Pid")})
+        after atom("infinity") -> atom("true")
+        apply atom("client") / int(1)(var("_cor0")))),
+
+(glob(atom("locker2"), atom("locker") / int(0)) ==> (fun() ->
+  receive
+    < {atom("req"),var("Client")} > when atom("true") -> do
+        call atom("erlang") : atom("!") (var("Client"),atom("ok"))
+        receive
+          < {atom("rel"),var("_cor0")} > when call atom("erlang") : atom("=:=") (var("_cor0"), var("Client")) ->
+            apply atom("locker") / int(0)()
+          after atom("infinity") -> atom("true")
+    after atom("infinity") -> atom("true"))),
+
+(glob(atom("locker2"), atom("start") / int(0)) ==> (fun() -> let var("Locker") =
+    call atom("erlang") : atom("self") () in 
+      do
+        call atom("erlang") : atom("spawn") (atom("locker2"),atom("client"),[var("Locker")]) 
+        do
+	  call atom("erlang") : atom("spawn") (atom("locker2"),atom("client"),[var("Locker")])
+	  apply atom("locker") / int(0) ())) >,
+
+(glob(atom("locker2"), atom("client") / int(1)) ==> (fun(var("_cor0"))->
+  let < var("Pid") > =
+    call atom("erlang") : atom("self") () in do
+      call atom("erlang") : atom("!") (var("_cor0"),{atom("req"),var("Pid")})
+      do
+        receive
+          < atom("ok") > when atom("true") ->
+            call atom("erlang") : atom("!") (var("_cor0"),{atom("rel"),var("Pid")})
+        after atom("infinity") -> atom("true")
+        apply atom("client") / int(1)(var("_cor0")))),
+
+(glob(atom("locker2"), atom("locker") / int(0)) ==> (fun() ->
+  receive
+    < {atom("req"),var("Client")} > when atom("true") -> do
+        call atom("erlang") : atom("!") (var("Client"),atom("ok"))
+        receive
+          < {atom("rel"),var("_cor0")} > when call atom("erlang") : atom("=:=") (var("_cor0"), var("Client")) ->
+            apply atom("locker") / int(0)()
+          after atom("infinity") -> atom("true")
+    after atom("infinity") -> atom("true"))),
+
+(glob(atom("locker2"), atom("start") / int(0)) ==> (fun() -> let var("Locker") =
+    call atom("erlang") : atom("self") () in
+      do
+        call atom("erlang") : atom("spawn") (atom("locker2"),atom("client"),[var("Locker")])
+        do
+          call atom("erlang") : atom("spawn") (atom("locker2"),atom("client"),[var("Locker")])
+          apply atom("locker") / int(0) ())),
+pid(0)) 
+
+=>+ 
+
+PE:ProcessEnvironment .

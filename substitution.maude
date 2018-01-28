@@ -1,0 +1,307 @@
+***(
+
+	SUBSTITUTION.MAUDE
+	
+	Core-Erlang is a single-assignment functional language. Variables get bound once and their
+	value cannot be changed anymore. Of course, we distinguish free and bound occurrences of
+	variables. The scopes of variables can overlap; in the case of variables that are
+	equally named, the variable of the innermost scope masks the variables (and their
+	corresponding binding) of the outer scopes.
+	
+	The SEM_SUBSTITUTION module implements the substitution that take place whenever a
+	variable (or multiple variables) gets bound to a value. It inductively traverses the 
+	term to which the binding applies and calculates the checks each occurrence of one
+	of the newly bound variables. If the occurrence is free, the variable is replaced
+	by the corresponding value.
+	
+***)
+
+fmod SEM_BINDING is
+	protecting SYNTAX .
+	
+	*** The terms of sort "Binding" model the binding of a constant value to a variable.
+	*** Note : a) Constants also comprise function semantics that are given by the
+	***           corresponding function body of the form fun(v_1,...,v_n) -> ex
+	***        b) Variables have either the form var("SomeName") or are
+	***	      function names written as atom("FunName") / int(arity) 
+	sort Binding .
+	op _-->_ : Var Const -> Binding [ctor prec 50] .
+	
+	*** The sort Env represents a set of bindings. It is represented as an associative
+	*** and commutative, comma-separated list. Again, specification of an identity
+	*** element considerably eases case distinction.
+	sort Env .
+	subsort Binding < Env .
+	op #empty-env : -> Env [ctor] .
+
+	op _,_ : Env Env -> Env [ctor assoc comm id: #empty-env prec 60] .
+endfm
+
+
+fmod SEM_SUBSTITUTION is
+	protecting INT .
+	protecting BOOL .
+	protecting SYNTAX .
+	protecting SEM_BINDING .
+
+	*** When it comes to computing free and bound occurrences of variables,
+	*** we have to shrink the set of free occurrences (for example when we
+	*** "enter" a new scope) Therefore we specify sets of variables here:
+	sort VarSet .
+	subsort Var < VarSet .
+	op #empty-varset : -> VarSet [ctor] .
+	op _;_ : VarSet VarSet -> VarSet [ctor assoc comm id: #empty-varset prec 60] .
+		
+	*** The #subst operation takes two arguments: An expression and an environment
+	*** binding variables to values.
+	*** It substitutes all free occurrences of variables in the expression that are 
+	*** bound in the environment yielding a new expression.
+	op #subst : Expr Env -> Expr .
+	
+	*** The patterns included in the clauses of receive and case statements
+	*** are always binding; occurrences of variables which also appear within those
+	*** patterns are bound by the pattern (if they appear in an expression
+	*** on the clauses right hand side)
+	op #substClauses : NeClauseList Env -> NeClauseList .
+	
+	*** Variables may also appear within comma-separated lists of expressions
+	*** such as the argument list of a function call or within tuples.
+	*** The #substExList function deals with these cases.
+	op #substExList : NeExprList Env -> NeExprList .
+	
+	*** An interesting property of Core-Erlang is the fact, that variables that
+	*** occur freely in a function body can get bound from outside the function
+	*** if the function itself is defined within a letrec statement. This property
+	*** becomes crucial when considering the semantics of the apply statement,
+	*** where an argument list is applied to a function definition. 
+	*** This function implements this part of the substitution.
+	op #substFunDef : NeFunDefList Env -> NeFunDefList .
+	
+	*** The #isBound operation just returns a boolean value stating whether
+	*** the variable given as the 1st argument is bound within the environment
+	op #isBound : Var Env -> Bool .
+	
+	*** The #restrictEnv operation takes a set of variables and removes any
+	*** bindings from the environment supplied as second argument. It is needed
+	*** to remove bindings of variables from the environment if the corresponding
+	*** variables are not free in some subexpressions.
+	op #restrictEnv : VarSet Env -> Env [memo] .
+	
+	*** The following operations (#projectVarSet and #getFunVarSet) extract the
+	*** variables that are bound in Patterns and function definition lists.
+	*** They are needed to compute the set of variables that get bound by
+	*** let, letrec, case, receive, catch and fun statements.
+	op #projectVarSet : Pat -> VarSet [memo] .
+	op #projectVarSet : Patterns -> VarSet [memo] .
+	op #getFunVarSet : NeFunDefList -> VarSet [memo] .
+
+		
+	vars ENV ENV1 ENV2 : Env .
+	vars C C1 C2 : Const .
+	vars P P1 P2 : Pat .
+	var V : Var .	
+	var VSET : VarSet .
+	var VSET1 VSET2 : VarSet .
+		
+	var CLAUSES : NeClauseList .
+	var CL : Clause .
+	var PATTERNS : Patterns .
+	var PLIST : NePatList .
+	var EX EX1 EX2 : Expr .
+	var EXLIST : NeExprList .
+	var VS : Variables .
+	var VS1 : Variables .
+	var VS2 : Variables .
+	var A : Atom .
+	var INT : Int .
+	var FDLIST : NeFunDefList .
+	var FUN : Fun .
+	var VLIST : NeVarList .
+		
+	*** equations of the #isBound operation
+	eq #isBound(V, (V --> C), ENV) = true .
+	eq #isBound(V, ENV) = false [owise] .
+
+	
+	*** #restrictEnv
+***	eq #restrictEnv(#empty-varset, ENV) = ENV .
+	eq #restrictEnv(V ; VSET, (V --> C), ENV) = #restrictEnv(V ; VSET, ENV) .
+***	eq #restrictEnv(V ; VSET, ENV) = #restrictEnv(VSET, ENV) [owise] .
+	eq #restrictEnv(VSET, ENV) = ENV [owise] .
+	
+		
+	*** #projectVarSet
+	*** Note: In patterns, variables can occur within nested tuples and lists.
+	***       Therefore we have to consider the whole term inductively.
+	eq #projectVarSet(V) = V .
+	eq #projectVarSet(C) = #empty-varset .
+	eq #projectVarSet(V = P) = V ; #projectVarSet(P) .
+	eq #projectVarSet(P, PLIST) = #projectVarSet(P) ; #projectVarSet(PLIST) .
+	
+	eq #projectVarSet({PLIST}) = #projectVarSet(PLIST) .
+	eq #projectVarSet({}) = #empty-varset .
+	
+	eq #projectVarSet([P1 | P2]) = #projectVarSet(P1) ; #projectVarSet(P2) .
+	eq #projectVarSet([]) = #empty-varset .
+	
+	eq #projectVarSet(<>) = #empty-varset .
+	eq #projectVarSet(< PLIST >) = #projectVarSet(PLIST) .
+	
+	
+	*** #getFunVarSet
+	*** Note: In contrast to patterns, function definition lists are flat, i.e.
+	***       we simply extract the function variables from the list.
+	eq #getFunVarSet(A / int(INT) = FUN) = A / int(INT) .	
+	eq #getFunVarSet((A / int(INT) = FUN) FDLIST) = A / int(INT) ; #getFunVarSet(FDLIST) .
+	
+	
+	*** #substClauses
+	*** Note: The variables that get bound by the pattern of a clause are computed
+	***       in the conditions yielding the corresponding set of variables VSET.
+	***	  Then, we remove possible binding of these variables from the environment
+	***	  thereby computing a new environment ENV1.
+	***	  This environment is used to substitute the variables occurring in the guard
+	***	  and rhs expression of the clause.
+	ceq #substClauses(PATTERNS when EX1 -> EX2, ENV) = PATTERNS when #subst(EX1, ENV1) -> #subst(EX2, ENV1) 
+	    if VSET := #projectVarSet(PATTERNS) /\
+	       ENV1 := #restrictEnv(VSET, ENV) .
+	eq #substClauses(CL CLAUSES, ENV) = #substClauses(CL, ENV) #substClauses(CLAUSES, ENV) .	       
+	       
+	
+	*** #substExList
+	eq #substExList(EX, ENV) = #subst(EX, ENV) .
+	eq #substExList(EX, EXLIST, ENV) = #subst(EX, ENV), #substExList(EXLIST, ENV) .
+		       		
+
+	*** #substFunDefList
+	*** Free occurrences of variables within the bodies of function definitions are possible.
+	*** This is due to the fact, that these variables may occur in the context of a letrec
+	*** statement where these variables get bound "from the outside" (see also the comment
+	*** when defining substitutions for the letrec statement).
+	eq #substFunDef(A / int(INT) = FUN, ENV) = A / int(INT) = #subst(FUN, ENV) .
+	eq #substFunDef((A / int(INT) = FUN) FDLIST, ENV) = (A / int(INT) = #subst(FUN, ENV)) #substFunDef(FDLIST, ENV) .
+
+					
+	*** The substitution is the identity mapping in all cases that are
+	*** not considered explicitly here.
+	*** Note: We only deal with expressions that may be changed by a substitution;
+	***       for all other cases, the following "identity"-equation applies:
+	eq #subst(EX, ENV) = EX [owise] .
+
+	
+	*** If the substitution given by the bindings in the second component is
+	*** empty, we do not descend into the subterms but immediately return the
+	*** unmodified term:
+	eq #subst(EX, #empty-env) = EX .
+	
+								
+	*** substitution for variables
+	eq #subst(V, (V --> C), ENV) = C .
+	
+
+	*** substitution for lists
+	*** Note: We do not need to deal with empty lists, empty tuples or empty
+	***       ordered sequences explicitly here since they are not modified by the 
+	***       substitution and are therefore dealt with by the "identity equation" 
+	***	  labelled with the otherwise [owise] attribute.
+	eq #subst([EX1 | EX2], ENV) = [#subst(EX1, ENV) | #subst(EX2, ENV)] .
+	
+	
+	*** substitution for tuples
+	eq #subst({EX, EXLIST}, ENV) = {#subst(EX, ENV), #substExList(EXLIST, ENV)} .
+	eq #subst({EX}, ENV) = {#subst(EX, ENV)} .
+	
+	
+	*** substitution for ordered sequences
+	eq #subst(< EX, EXLIST >, ENV) = < #subst(EX, ENV), #substExList(EXLIST, ENV) > .
+	eq #subst(< EX >, ENV) = < #subst(EX, ENV) > .
+
+			 		 
+	*** substitution for the case statement
+	*** Note: The patterns in the clauses bind variables that must not
+	***       be substituted according to the environment ENV! See the
+	***	  definitions of the #substClauses operation for details.
+	eq #subst(case EX of CLAUSES end, ENV) = case #subst(EX, ENV) of #substClauses(CLAUSES, ENV) end .
+
+	
+	*** substitution for the let statement
+	*** Note: Evaluation of the expression EX1 yields an ordered sequence of values
+	***       that are bound to the corresponding variables in the sequence of variables VS.
+	***	  EX1 is evaluated in the "outer" environment ENV (i.e. the environment before
+	***       the binding of the variables takes place), therefore we substitute occurrences
+	***	  of variables that get bound by ENV here. 
+	***	  Variables from VS occurring in EX2 are bound by the let statement and are
+	***	  therefore not substituted here!
+	***	  Therefore we extract the variables from VS (#projectVarSet) and remove any
+	***       bindings of these variables from our environment ENV.
+	ceq #subst(let VS = EX1 in EX2, ENV) = let VS = #subst(EX1, ENV) in #subst(EX2, ENV1) 
+	    if VSET := #projectVarSet(VS) /\
+	       ENV1 := #restrictEnv(VSET, ENV) .
+
+
+	*** substitution for the letrec statement
+	*** Note: Within the function bodies that appear in the function definitions of
+	***	  the letrec statement, there may be references to variables and functions
+	***	  from the outer environment!
+	*** Example: The following core-erlang code fragment is correct and the function
+	***	     application yields the integer 2.
+	***
+	***           let V = 2 in
+	***             letrec 'test'/0 = fun() -> V in
+	***	          apply 'test'/0 ()
+	***
+	*** Therefore, we substitute free occurrences of variables within the function
+	*** bodies (but not function names that get bound by the letrec statement itself,
+	*** as we do not model the letrec statement's semantic here).
+	ceq #subst(letrec FDLIST in EX, ENV) = letrec #substFunDef(FDLIST, ENV1) in #subst(EX, ENV1) 
+	    if VSET := #getFunVarSet(FDLIST) /\
+	       ENV1 := #restrictEnv(VSET, ENV) .
+	       	
+
+	*** substitution for the fun statement
+	*** Note: The variables v_1 ... v_n occurring in the function head 
+	***       fun(v_1, ... , v_n) are unbound within the function body.
+	***       All other bindings stay valid within the function body and
+	***       are henceforth propagated by the substitution.
+	eq #subst(fun() -> EX, ENV) = fun() -> #subst(EX, ENV) .
+	ceq #subst(fun(VLIST) -> EX, ENV) = fun(VLIST) -> #subst(EX, ENV1) 
+	    if VSET := #projectVarSet(VLIST) /\
+	       ENV1 := #restrictEnv(VSET, ENV) .
+				
+				
+	*** substitution for the receive statement
+	*** Note: As in the case statement, substitutions of the clauses of the receive statement are handled
+	***       by the #substClauses operation that takes care of free and bound occurrences.
+	eq #subst(receive CLAUSES after EX1 -> EX2, ENV) = receive #substClauses(CLAUSES, ENV) after #subst(EX1, ENV) -> #subst(EX2, ENV) .
+	
+		
+	*** substitution for apply
+	eq #subst(apply EX(), ENV) = apply #subst(EX, ENV)() .
+	eq #subst(apply EX(EXLIST), ENV) = apply #subst(EX, ENV) (#substExList(EXLIST, ENV)) .
+
+	
+	*** substitutions for the inter-module call operator
+	eq #subst(call EX1 : EX2(), ENV) = call #subst(EX1,ENV) : #subst(EX2,ENV) () .
+	eq #subst(call EX1 : EX2(EXLIST), ENV) = call #subst(EX1,ENV) : #subst(EX2,ENV) (#substExList(EXLIST,ENV)) .
+	
+	
+	*** substitutions for the primop operator
+	eq #subst(primop EX(), ENV) = primop #subst(EX, ENV)() .
+	eq #subst(primop EX(EXLIST), ENV) = primop #subst(EX, ENV) (#substExList(EXLIST, ENV)) .
+	
+	
+	*** substitutions for the sequencing operator
+	eq #subst(do EX1 EX2, ENV) = do #subst(EX1, ENV) #subst(EX2, ENV) .	
+	
+	
+	*** substitution for the try-catch operator
+	ceq #subst(try EX of VS1 -> EX1 catch VS2 -> EX2, ENV) = try #subst(EX, ENV) of VS1 -> #subst(EX1, ENV1) catch VS2 -> #subst(EX2, ENV2) 
+	    if VSET1 := #projectVarSet(VS1) /\
+	       VSET2 := #projectVarSet(VS2) /\
+	       ENV1 := #restrictEnv(VSET1, ENV) /\
+	       ENV2 := #restrictEnv(VSET2, ENV) . 
+
+	       		
+	*** substitution for the catch-operator
+	eq #subst(catch EX, ENV) = catch #subst(EX,ENV) .
+endfm

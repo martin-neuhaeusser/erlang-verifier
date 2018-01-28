@@ -1,0 +1,34 @@
+***(
+
+	FRAMEWORK.MAUDE
+	
+	This file just loads the different files that contain all the
+	modules. In order to satisfy all dependencies between the modules,
+	the order has to be preserved.
+	
+***)
+	
+load model-checker.maude .
+load updown.maude .
+load syntax.maude .
+load parsing.maude .
+load pid.maude .
+load exception.maude .
+load label.maude .
+load result.maude .
+load modenv.maude .
+load mailbox.maude .
+load substitution.maude .
+load process.maude .
+load matching.maude .
+load normalisation.maude .
+load primop.maude .
+load corebib.maude .
+load system.maude .
+load ltl-check.maude .
+load loop.maude .
+
+*** After we have loaded the interface to Maude's input/output
+*** facility (called LOOP mode), we initialise the I/O system:
+
+loop init .

@@ -1,0 +1,143 @@
+***(
+	
+	MODENV.MAUDE
+
+	In Core-Erlang, functions are normally defined within the context of a module.
+	The module consists mainly of a function definition list (i.e. a whitespace
+	separated list of function definitions) and some attributes that specify, for
+	example, which functions may be called from outside the module.
+	Note: We do not enforce this when evaluating an inter-module call as such a
+	      call would lead to a compile time error.
+	The functional (Maude) module SEM_MODENV defines the operations needed to
+	deal with the set of functions that are known to the system when evaluating
+	processes. 
+	Functions can be included in this set by loading Core-Erlang modules into
+	the Maude system using the add-module command.
+	Additionally, we define operations to extract functions from the set and
+	to convert the set representation back to a list of function definitions
+	(corresponding to the Core-Erlang syntax).
+
+***)
+
+fmod SEM_MODENV is
+	protecting SYNTAX .
+	protecting MAUDE-SYNTAX-UPDOWN .
+
+	*** In order to uniquely identify functions that may be declared with the same
+	*** function name and arity in different modules, we introduce a global identifier
+	*** by additionally giving the module the function is declared in. 
+	*** These global function names are terms of sort GlobalFunName. 
+	sort GlobalFunName .
+	op glob : Atom FunName -> GlobalFunName [ctor] .
+
+	*** The mapping of global function names to their function bodies is syntactically
+	*** done using the ==> operator.
+	sort ModEnvMap .
+	op _==>_ : GlobalFunName Fun -> ModEnvMap [ctor prec 70] .
+	
+	*** The environment of a module (i.e. all the function names that are bound
+	*** to functional expressions within the module) is the set of all mappings
+	*** from (global) function names to their respective bodies.
+	sort ModEnv .
+	subsort ModEnvMap < ModEnv .
+	
+	op #empty-modenv : -> ModEnv [ctor] .
+	op _,_ : ModEnv ModEnv -> ModEnv [ctor assoc comm prec 71 id: #empty-modenv] .
+
+	*** In order to extract the function definitions contained in a Core-Erlang
+	*** module we use #extract-global-functions. It takes a Core-Erlang module
+	*** as its argument and returns the module environment consisting of the
+	*** functions that are defined in the module.
+	op #extract-global-functions : ErlModule -> ModEnv .
+	op #extract-global-functions : Atom ModuleBody -> ModEnv .
+
+	*** It is possible that there are functions of multiple modules included in
+	*** the module environment. The #getModule function returns a the subset of
+	*** the given module environment that only consists of the functions that
+	*** are declared within the module (given as the first argument).
+	op #getModule : Atom ModEnv -> ModEnv [memo] .
+	
+	*** During evaluation of an inter-module call, we switch the "current module"
+	*** i.e. we change the environment s.t. the functions declared in the new
+	*** "current module" are locally accessible. This resembles a letrec statement
+	*** that defines all functions of the module.
+	*** The #getFunDefList operation converts a possibly restricted module environment
+	*** using the #getModule function to a function definition list that
+	*** can be used in such a letrec construct.
+	op #getFunDefList : ModEnv -> NeFunDefList [memo] .
+		
+	var GLOB : GlobalFunName .
+	var ME : ModEnv .
+	var FUN : Fun .
+	var MN : Atom .
+	var FNLIST : NeFunNameList .
+	var MATTR : Attributes .
+	var MBODY : ModuleBody .
+	var FDLIST : NeFunDefList .
+	var FD : FunDef .
+	var FNAME : Atom .
+	var FARITY : ErlInt .
+	var FPARAM : NeVarList .
+	var FEXPR : Expr .
+	var FN : FunName .
+	var MAP : ModEnvMap .
+
+	eq #extract-global-functions(module MN [FNLIST] MATTR MBODY end) 
+		= #extract-global-functions(MN,MBODY) .
+	eq #extract-global-functions(module MN [] MATTR MBODY end) 
+		= #extract-global-functions(MN,MBODY) .
+	eq #extract-global-functions(MN, FNAME / FARITY = FUN FDLIST) 
+		= glob(MN, FNAME / FARITY) ==> FUN, 
+		  #extract-global-functions(MN, FDLIST) .
+	eq #extract-global-functions(MN, (FNAME / FARITY = FUN)) 
+		= glob(MN, FNAME / FARITY) ==> FUN .	
+
+	*** If there are multiple modules loaded, #getModule filters out all functions of the
+	*** module whose name is specified in the first argument and returns a corresponding
+	*** restricted module environment.
+	eq #getModule(MN, #empty-modenv) = #empty-modenv .
+	eq #getModule(MN, glob(MN, FNAME / FARITY) ==> FUN, ME) 
+		= glob(MN, FNAME / FARITY) ==> FUN, 
+	          #getModule(MN, ME) .
+	eq #getModule(MN, MAP, ME) = #getModule(MN, ME) [owise] .
+	
+	*** #getFunDefList converts a given module environment to the
+	*** corresponding function definition list:	
+	eq #getFunDefList(glob(MN, FNAME / FARITY) ==> FUN) = FNAME / FARITY = FUN .
+	eq #getFunDefList(glob(MN, FNAME / FARITY) ==> FUN, ME) = 
+		FNAME / FARITY = FUN 
+		#getFunDefList(ME) [owise] .	
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+	
+	op #up : GlobalFunName -> Term [memo] .
+	op #up : ModEnv -> Term [memo] .
+	op #up : ModEnvMap -> Term [memo] .
+
+	op #downGlobalFunName : Term -> GlobalFunName [memo] .
+	op #downModEnvMap : Term -> ModEnvMap [memo] .
+	op #downModEnv : Term -> ModEnv [memo] .
+			
+	var EX : Expr .
+	vars T T1 T2 : Term .
+	var SUB : Substitution .
+
+	*** Meta-representing the module environment:
+	eq #up(glob(MN, FN)) = 'glob[#up(MN), #up(FN)] .
+	eq #up(GLOB ==> EX) = '_==>_[#up(GLOB), #up(EX)] .
+		
+	eq #up(#empty-modenv) = '#empty-modenv.ModEnv .
+	eq #up(GLOB ==> EX) = '_==>_[#up(GLOB), #up(EX)] .
+	ceq #up(GLOB ==> EX, ME) = '_`,_[#up(GLOB ==> EX), #up(ME)] 
+		if ME =/= #empty-modenv .
+
+	*** Lowering the meta-representation level of module environments:
+	eq #downGlobalFunName('glob[T1,T2]) = glob(#downAtom(T1), #downFunName(T2)) .
+	eq #downModEnvMap('_==>_[T1,T2]) = #downGlobalFunName(T1) ==> #downExpr(T2) .
+	eq #downModEnv('#empty-modenv.ModEnv) = #empty-modenv .
+	ceq #downModEnv(T) = #downModEnvMap(T1), #downModEnv(T2) 
+		if SUB := metaMatch(GRAMMAR, '_`,_['MAP:ModEnvMap, 'ME:ModEnv], T, nil, 0)
+		/\ 'MAP:ModEnvMap <- T1 ; 'ME:ModEnv <- T2 := SUB .
+endfm

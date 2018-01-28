@@ -1,0 +1,34 @@
+***(
+
+	EXCEPTION
+
+	We declare the different kinds of exception that are internally
+	known to the Erlang runtime environment.
+
+***)
+	
+fmod SEM_EXCEPTION is
+	protecting META-LEVEL .
+	
+	sort ExceptionClass .
+  
+	op thrown : -> ExceptionClass .
+	op exit : -> ExceptionClass .
+	op error : -> ExceptionClass . 
+  
+	*******************************
+	*** METAREPRESENTATION PART *** 
+	*******************************
+	op #up : ExceptionClass -> Term [memo] .
+	op #downExceptionClass : Term -> ExceptionClass [memo] .
+
+	*** Meta-representing the exception class
+	eq #up(thrown) = 'thrown.ExceptionClass .
+	eq #up(exit) = 'exit.ExceptionClass .
+	eq #up(error) = 'error.ExceptionClass .
+		
+	*** Lowering the meta-representation level of exception classes
+	eq #downExceptionClass('thrown.ExceptionClass) = thrown .
+	eq #downExceptionClass('exit.ExceptionClass) = exit .
+	eq #downExceptionClass('error.ExceptionClass) = error .
+endfm

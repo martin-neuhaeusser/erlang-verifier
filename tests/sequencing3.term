@@ -1,0 +1,18 @@
+set trace substitution off .
+debug rewrite in THEORY : 
+(sys-start, < tau | #no-res
+       | let var("Var") = int(0) in
+ 	     do
+	         case {int(1)} of
+		     {var("Var")} when atom("true") -> 
+                         do
+			     call atom("erlang") : atom("!") (call atom("erlang") : atom("self") (), {var("Var")})
+			     call atom("erlang") : atom("!") (call atom("erlang") : atom("self") (), {var("Var")})
+		 end
+	         var("Var")
+	| pid(0) 
+	| #empty-mbox 
+	| #empty-pid-seq 
+	| false 
+	| #empty-modenv >, 
+#empty-modenv, pid(0)) .

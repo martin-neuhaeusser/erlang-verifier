@@ -1,0 +1,69 @@
+***(
+
+	UPDOWN.MAUDE
+	
+	This file contains a functional module that implements some helper
+	functions needed to lower or raise terms between the meta levels.
+	It only deals with the built-in terms like integers and strings.
+
+***)
+
+fmod META-UP-DOWN is
+	protecting META-LEVEL .
+	protecting CONVERSION .	
+	protecting STRING .
+	protecting INT .
+	protecting BOOL .
+	
+	op #up : Int -> Term [memo] .
+	op #up : String -> Term [memo] .
+	op #up : Bool -> Term [memo] .
+	op #up : Char -> Term [memo] .
+	op #up : Float -> Term [memo] .
+
+	op #downInt : Term -> Int [memo] .
+	op #downString : Term -> String [memo] .
+	op #downBool : Term -> Bool [memo] .
+	op #downChar : Term -> Char [memo] .
+	op #downFloat : Term -> Float [memo] .
+
+	var INT : Int .
+	var STR : String .
+	var CHR : Char .
+	var QID : Qid . 	
+	var T : Term .
+	
+	*** Metarepresentation of maude strings and integers
+	eq #up(0) = '0.Zero .
+	ceq #up(INT) = qid("s_^" + string(INT, 10)) ['0.Zero] if INT > 0 .
+	ceq #up(INT) = qid("-_")[#up(-_(INT))] if INT < 0 .
+     	ceq #up(STR) = qid("\"" + STR + "\".String") if length(STR) =/= 1 .
+	ceq #up(CHR) = qid("\"" + CHR + "\".Char") if length(CHR) = 1 .
+	eq #up(true) = 'true.Bool .
+	eq #up(false) = 'false.Bool .
+
+	*** Lowering the representation level
+	eq #downInt('-_[T]) = -_(#downInt(T)) .
+	ceq #downInt(QID[T]) = trunc(rat(substr(string(QID), 3, _-_(length(string(QID)), 3)), 10)) + #downInt(T)
+	  if substr(string(QID), 0, 3) == "s_^" .
+	eq #downInt('0.Zero) = 0 .
+	eq #downInt('s_[T]) = 1 + #downInt(T) .
+	
+	ceq #downString(QID) = substr(string(QID), 1, _-_(INT, 2)) 
+	  if INT := rfind(string(QID), ".String", length(string(QID))) .
+	ceq #downString(QID) = substr(string(QID), 1, _-_(INT, 2)) 
+	  if INT := rfind(string(QID), ".Char", length(string(QID))) .
+	ceq #downString(QID) = substr(string(QID), 1, _-_(length(string(QID)), 2))
+	  if find(string(QID), "\"", 0) == 0 /\
+	     find(string(QID), "\"", 1) == _-_(length(string(QID)),1) .
+	ceq #downChar(QID) = substr(string(QID), 1, 1) 
+	  if rfind(string(QID), ".Char", 3) == 3 /\
+	  length(string(QID)) = 8 .
+	ceq #downChar(QID) = substr(string(QID), 1, 1) 
+	  if length(string(QID)) = 3 /\
+    	     find(string(QID), "\"", 0) == 0 /\
+	     find(string(QID), "\"", 2) == 2 .
+
+	eq #downBool('false.Bool) = false .
+	eq #downBool('true.Bool) = true .
+endfm

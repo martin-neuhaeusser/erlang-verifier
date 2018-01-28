@@ -1,0 +1,332 @@
+(add-module((module 'locker' ['client' / 2,
+		 'heads' / 1,
+		 'locker' / 1,
+		 'module_info' / 0,
+		 'module_info' / 1,
+		 'start' / 0,
+		 'tails' / 1]
+    attributes []
+('start' / 0 =
+        fun () -> 
+	let  < 	     Locker >  =
+	    	    call 'erlang' : 'self'
+		()
+	in  do  		apply 'start_client' / 2
+		    (['a' | []], Locker)
+		do  		    apply 'start_client' / 2
+			(['b' | []], Locker)
+		    do  			apply 'start_client' / 2
+			    (['a' | ['b' | []]], Locker)
+			let  < _cor1 >  =
+			    			    apply 'state' / 1
+				(['a' | ['b' | []]])
+			in  			    apply 'locker' / 1
+				(_cor1))
+('state' / 1 =
+        fun (_cor0) -> 
+	case _cor0 of
+	   < [] >  when 'true' -> 
+	      	      []
+	  	   < [R | Rs] >  when 'true' -> 
+	      let  < _cor1 >  =
+		  		  apply 'state' / 1
+		      (Rs)
+	      in  		  [{R,'none',[]} | _cor1]
+	   < _cor2 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor2})
+	end)
+('locker' / 1 =
+        fun (_cor0) -> 
+		receive
+	  	   < {'request',Client,Resources} >  when 'true' -> 
+	      	      case apply 'available' / 2
+		       (_cor0, Resources) of
+				 < 'true' >  when 'true' -> 
+		    do  			call 'erlang' : '!'
+			    (Client, 'ok')
+			let  < _cor1 >  =
+			    			    apply 'grant' / 3
+				(_cor0, Client, Resources)
+			in  			    apply 'locker' / 1
+				(_cor1)
+				 < 'false' >  when 'true' -> 
+		    let  < _cor2 >  =
+						apply 'wait' / 3
+			    (_cor0, Client, Resources)
+		    in  			apply 'locker' / 1
+			    (_cor2)
+		 < _cor3 >  when 'true' -> 
+		      primop 'match_fail'
+			  ({'case_clause',_cor3})
+	      end
+	  	   < {'release',Client} >  when 'true' -> 
+	      let  < _cor4 >  =
+		  		  apply 'release' / 2
+		      (_cor0, Client)
+	      in  		  apply 'locker' / 1
+		      (_cor4)
+	after 'infinity' -> 
+	  'true')
+('available' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < State,[] >  when 'true' -> 
+	      	      'true'
+	  	   < State,[R | Rs] >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'avail' / 2
+		      (State, R)
+	      in  let  < _cor2 >  =
+		      		      apply 'available' / 2
+			  (State, Rs)
+		  in  		      call 'erlang' : 'and'
+			  (_cor3, _cor2)
+	   < _cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor5,_cor4})
+	end)
+('avail' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < [],R >  when 'true' -> 
+	      	      'false'
+	  	   < [{R,'none',[]} | Ss],_cor4 >  when call 'erlang' : '=:='
+					      (_cor4,
+					       R) -> 
+	      	      'true'
+	  	   < [{R,_cor5,_cor6} | Ss],_cor7 >  when call 'erlang' : '=:='
+						(_cor7,
+						 R) -> 
+	      	      'false'
+	  	   < [_cor8 | Ss],R >  when 'true' -> 
+	      	      apply 'avail' / 2
+		  (Ss, R)
+	   < _cor3,_cor2 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor3,_cor2})
+	end)
+('grant' / 3 =
+        fun (_cor2,_cor1,_cor0) -> 
+	case  < _cor2,_cor1,_cor0 >  of
+	   < State,Client,[] >  when 'true' -> 
+	      	      State
+	  	   < State,Client,[R | Rs] >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'update' / 3
+		      (State, Client, R)
+	      in  		  apply 'grant' / 3
+		      (_cor3, Client, Rs)
+	   < _cor6,_cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor6,_cor5,_cor4})
+	end)
+('update' / 3 =
+        fun (_cor2,_cor1,_cor0) -> 
+	case  < _cor2,_cor1,_cor0 >  of
+	   < [{R,'none',[]} | Ss],Client,_cor7 >  when call 'erlang' : '=:='
+						     (_cor7,
+						      R) -> 
+	      	      [{R,Client,[]} | Ss]
+	  	   < [S | Ss],Client,R >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'update' / 3
+		      (Ss, Client, R)
+	      in  		  [S | _cor3]
+	  < _cor6,_cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor6,_cor5,_cor4})
+	end)
+('wait' / 3 =
+        fun (_cor2,_cor1,_cor0) -> 
+	case  < _cor2,_cor1,_cor0 >  of
+	   < State,Client,[] >  when 'true' -> 
+	      	      State
+	  	   < State,Client,[R | Rs] >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'insert' / 3
+		      (State, Client, R)
+	      in  		  apply 'wait' / 3
+		      (_cor3, Client, Rs)
+	   < _cor6,_cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor6,_cor5,_cor4})
+	end)
+('insert' / 3 =
+        fun (_cor2,_cor1,_cor0) -> 
+	case  < _cor2,_cor1,_cor0 >  of
+	   < [{R,A,Cs} | Ss],Client,_cor8 >  when call 'erlang' : '=:='
+						(_cor8,
+						 R) -> 
+	      let  < _cor3 >  =
+		  		  call 'lists' : 'append'
+		      (Cs, [Client | []])
+	      in  		  [{R,A,_cor3} | Ss]
+	  	   < [S | Ss],Client,R >  when 'true' -> 
+	      let  < _cor4 >  =
+		  		  apply 'insert' / 3
+		      (Ss, Client, R)
+	      in  		  [S | _cor4]
+	   < _cor7,_cor6,_cor5 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor7,_cor6,_cor5})
+	end)
+('release' / 2 =
+        fun (_cor1,_cor0) -> 
+	let  < 	     New >  =
+	    	    apply 'free' / 2
+		(_cor1, _cor0)
+	in  	    apply 'next' / 1
+		(New))
+('free' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < [],Client >  when 'true' -> 
+	      	      []
+	  	   < [{R,Client,Cs} | Ss],_cor6 >  when call 'erlang' : '=:='
+					      (_cor6,
+					       Client) -> 
+	      let  < _cor2 >  =
+		  		  apply 'free' / 2
+		      (Ss, Client)
+	      in  		  [{R,'none',Cs} | _cor2]
+	  	   < [S | Ss],Client >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'free' / 2
+		      (Ss, Client)
+	      in  		  [S | _cor3]
+	  < _cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor5,_cor4})
+	end)
+('next' / 1 =
+        fun (_cor0) -> 
+	let  < 	     Heads >  =
+	    	    apply 'heads' / 1
+		(_cor0)
+	in  let  < 		 Tails >  =
+				apply 'tails' / 1
+		    (_cor0)
+	    in  let  < 		     Candidates >  =
+		    		    call 'erlang' : '--'
+			(Heads, Tails)
+		in  		    apply 'grants' / 2
+			(_cor0, Candidates))
+('heads' / 1 =
+        fun (_cor0) -> 
+	case _cor0 of
+	   < [] >  when 'true' -> 
+	      	      []
+	  	   < [{R,'none',[C | Cs]} | Ss] >  when 'true' -> 
+	      let  < 		   Hs >  =
+		  		  apply 'heads' / 1
+		      (Ss)
+	      in  		  case call 'lists' : 'member'
+			   (C, Hs) of
+		    		     < 'true' >  when 'true' -> 
+						Hs
+		    		     < 'false' >  when 'true' -> 
+						[C | Hs]
+		     < _cor2 >  when 'true' -> 
+			  primop 'match_fail'
+			      ({'case_clause',_cor2})
+		  end
+	  	   < [_cor4 | Ss] >  when 'true' -> 
+	      	      apply 'heads' / 1
+		  (Ss)
+	   < _cor3 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor3})
+	end)
+('tails' / 1 =
+        fun (_cor0) -> 
+	case _cor0 of
+	   < [] >  when 'true' -> 
+	      	      []
+	  	   < [{R,A,[]} | Ss] >  when 'true' -> 
+	      	      apply 'tails' / 1
+		  (Ss)
+	  	   < [{R,'none',[C | Cs]} | Ss] >  when 'true' -> 
+	      let  < _cor1 >  =
+		  		  apply 'tails' / 1
+		      (Ss)
+	      in  		  call 'erlang' : '++'
+		      (Cs, _cor1)
+	  	   < [{R,_cor5,[C | Cs]} | Ss] >  when 'true' -> 
+	      let  < _cor2 >  =
+		  		  apply 'tails' / 1
+		      (Ss)
+	      in  let  < _cor3 >  =
+		      		      call 'erlang' : '++'
+			  (Cs, _cor2)
+		  in  		      [C | _cor3]
+	   < _cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor4})
+	end)
+('grants' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < State,[] >  when 'true' -> 
+	      	      State
+	  	   < State,[C | Cs] >  when 'true' -> 
+	      let  < _cor2 >  =
+		  		  apply 'grant' / 2
+		      (State, C)
+	      in  		  apply 'grants' / 2
+		      (_cor2, Cs)
+	   < _cor4,_cor3 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor4,_cor3})
+	end)
+('grant' / 2 =
+        fun (_cor1,_cor0) -> 
+	case  < _cor1,_cor0 >  of
+	   < [],Client >  when 'true' -> 
+	      do  		  call 'erlang' : '!'
+		      (Client, 'ok')
+		  		  []
+	  	   < [{R,'none',[Client | Cs]} | Ss],_cor6 >  when call 'erlang' : '=:='
+						       (_cor6,
+							Client) -> 
+	      let  < _cor2 >  =
+		  		  apply 'grant' / 2
+		      (Ss, Client)
+	      in  		  [{R,Client,Cs} | _cor2]
+	  	   < [S | Ss],Client >  when 'true' -> 
+	      let  < _cor3 >  =
+		  		  apply 'grant' / 2
+		      (Ss, Client)
+	      in  		  [S | _cor3]
+	   < _cor5,_cor4 >  when 'true' -> 
+		primop 'match_fail'
+		    ({'function_clause',_cor5,_cor4})
+	end)
+('start_client' / 2 =
+        fun (_cor1,_cor0) -> 
+		call 'erlang' : 'spawn'
+	    ('locker', 'client', [_cor1 | [_cor0 | []]]))
+('client' / 2 =
+        fun (_cor1,_cor0) -> 
+	let  < 	     Client >  =
+	    	    call 'erlang' : 'self'
+		()
+	in  do  		call 'erlang' : '!'
+		    (_cor0, {'request',Client,_cor1})
+				receive
+		  		   < 'ok' >  when 'true' -> 
+		      do  			  call 'erlang' : '!'
+			      (_cor0, {'release',Client})
+			  			  apply 'client' / 2
+			      (_cor1, _cor0)
+		after 'infinity' -> 
+		  'true')
+('module_info' / 0 =
+    fun () -> 
+	call 'erlang' : 'get_module_info'
+	    ('locker'))
+('module_info' / 1 =
+    fun (_cor0) -> 
+	call 'erlang' : 'get_module_info'
+	    ('locker', _cor0))
+end)))

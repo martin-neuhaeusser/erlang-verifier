@@ -1,0 +1,236 @@
+***(
+	
+	LABEL.MAUDE
+	
+	The whole system comprises two levels: 
+	The equational theory that evaluates expressions inside of the process's context and
+	the rewriting rules that model inter-process communication (message passing, exit signals, etc.)
+	Labels are used to abstract the current state. In case of
+	  (a) the equational theory, the process's label indicates by 
+	        - the label tau, that the normalisation within the equational theory is continued
+	        - any other label indicates a normal form w.r.t. the equational theory. The
+	          label then gives more details why normalisation stopped.
+	      These labels are defined in the functional module SEM_LABEL.
+	     
+	  (b) the rewriting rules of the transition level operate on equivalence classes w.r.t.
+	      the underlying equational theory. They non-deterministically select one of the
+	      (normalised) processes and model the behaviour of the side-effect according to
+	      its description in the process's label.
+	      Which process was picked and the side-effect that took place is reflected by the
+	      second kind of labels: System level labels.
+	      They are defined in the second functional module SEM_SYSLABEL .
+
+***)
+
+fmod SEM_LABEL is
+	protecting SYNTAX .
+	protecting SEM_PID .
+	protecting SEM_EXCEPTION .
+	protecting MAUDE-SYNTAX-UPDOWN .
+	
+	*** We distinguish between two types of expression level labels. 
+	*** First we have labels that signal a side-effect change of the whole system state. 
+	*** They indicate that a normal form w.r.t. the equational theory is reached.
+	*** Additionally, there are expression level labels that indicate the termination 
+	*** of a process (uncaught exceptions).
+	*** Both types are subsumed under the sort Label:
+	sort Label .
+	sort StopLabel .
+	sort ExceptionLabel .
+
+	subsort ExceptionLabel < StopLabel .
+	subsort StopLabel < Label .
+	
+	*** An expression label "tau" is an "unobservable" action.
+	*** This means that the process normalisation within the equational theory continues. 
+	op tau : -> Label [ctor] .
+	
+	*** The send expression-level label is used to signal that the corresponding process 
+	*** sends a message. The first argument is the receiving PID, the second argument the 
+	*** constant sent.
+	*** Because sending messages to another process is a side-effect, this label indicates
+	*** a normal form w.r.t. the equational theory.
+	op _!_ : Pid Const -> StopLabel [ctor] .	
+
+	*** To model the reception on the system level, we switch to the "receive" 
+	*** expression level label as soon as we find a matching message in the process's mailbox.
+	op receive : Const -> StopLabel [ctor] .
+
+	*** When evaluating a receive-statement without a matching message in the mailbox,
+	*** we distinguish two cases:
+	*** First, there is no timeout specified. In this case, we indicate the temporary end
+	*** of the normalisation by setting the process label to "blocked".
+	*** If there is a timeout specified, we indicate the waiting condition. On the system level,
+	*** this means a non-deterministic choice: We do not have a notion of time. Therefore one
+	*** can always continue waiting for arrival of a message or one can issue a timeout.
+	op blocked : -> StopLabel [ctor] .
+	op waiting : -> StopLabel [ctor] .
+	
+	*** The spawn expression labels signal the creation of a new process. There are two 
+	*** possibilities:
+	*** spawn creates a new process whereas 
+	*** spawn_link additionally establishes a link with the newly created process.
+	*** (this happens _atomically_)
+	op spawn : Atom Atom ListConst -> StopLabel [ctor] .
+	op spawn-link : Atom Atom ListConst -> StopLabel [ctor] .
+	
+	*** If an exception is thrown during the evaluation, this stops normalisation within
+	*** the equational theory. The process's label indicates what exception was thrown.
+	op exception : ExceptionClass Const -> ExceptionLabel [ctor] .
+	
+	*** The send-signal label indicated that the corresponding process has evaluated
+	*** a non-local exit call (i.e. a call to exit where the PID of the process that
+	*** should receive the corresponding exit-signal is specified).
+	op send-signal : Pid Const -> StopLabel [ctor] .
+	
+	*** the "link" and "unlink" expression level labels reflect
+	*** the creation or deletion of a link to another process.
+	op link : Pid -> StopLabel [ctor] .
+	op unlink : Pid -> StopLabel [ctor] .
+	
+	*** the trapexit label signals a change operation to the trap_exit process flag. 
+	op trapexit : Atom -> StopLabel [ctor] .
+
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+
+	op #up : Label -> Term [memo] .
+	op #downLabel : Term -> Label [memo] .
+	
+	var EL : Label .
+	var EX : Expr .
+	var PID : Pid .
+	var EXCLASS : ExceptionClass .
+	var ATOM : Atom .
+	vars T1 T2 T3 : Term .
+	vars A1 A2 : Atom .
+	var LIST : ListConst .
+	
+	*** Implementation of the meta-representation part
+	eq #up(tau) = 'tau.Label .
+	eq #up(PID ! EX) = '_!_[#up(PID),#up(EX)] .
+	eq #up(receive(EX)) = 'receive[#up(EX)] .
+	eq #up(blocked) = 'blocked.StopLabel .	
+	eq #up(waiting) = 'waiting.StopLabel .
+	eq #up(spawn(A1,A2,LIST)) = 'spawn[#up(A1),#up(A2),#up(LIST)] .
+	eq #up(spawn-link(A1,A2,LIST)) = 'spawn-link[#up(A1),#up(A2),#up(LIST)] .	
+	eq #up(exception(EXCLASS,EX)) = 'exception[#up(EXCLASS), #up(EX)] .
+	eq #up(send-signal(PID,EX)) = 'send-signal[#up(PID), #up(EX)] .
+	eq #up(link(PID)) = 'link[#up(PID)] .
+	eq #up(unlink(PID)) = 'unlink[#up(PID)] .
+	eq #up(trapexit(ATOM)) = 'trapexit[#up(ATOM)] .
+
+	*** Lowering the meta-representation level of expression level labels
+	eq #downLabel('tau.Label) = tau .
+	eq #downLabel('_!_[T1, T2]) = #downPid(T1) ! #downExpr(T2) .
+	eq #downLabel('receive[T1]) = receive(#downExpr(T1)) .
+	eq #downLabel('blocked.StopLabel) = blocked .
+	eq #downLabel('waiting.StopLabel) = waiting .
+	eq #downLabel('spawn[T1,T2,T3]) = spawn(#downAtom(T1),#downAtom(T2),#downExpr(T3)) .
+	eq #downLabel('spawn-link[T1,T2,T3]) = spawn-link(#downAtom(T1),#downAtom(T2),#downExpr(T3)) .	
+	eq #downLabel('exception[T1,T2]) = exception(#downExceptionClass(T1),#downExpr(T2)) .
+	eq #downLabel('send-signal[T1,T2]) = send-signal(#downPid(T1),#downExpr(T2)) .
+	eq #downLabel('link[T1]) = link(#downPid(T1)) .
+	eq #downLabel('unlink[T1]) = unlink(#downPid(T1)) .
+	eq #downLabel('trapexit[T1]) = trapexit(#downAtom(T1)) .	
+endfm	
+
+fmod SEM_SYSLABEL is
+	protecting SYNTAX .
+	protecting SEM_PID .
+	protecting MAUDE-SYNTAX-UPDOWN .
+	
+	sort SysLabel .
+	
+	*** The sys-start label signals the beginning of the whole rewriting.
+	*** It is the first system state before any side-effect occurs.
+	op sys-start : -> SysLabel .
+
+	*** The sys-noop label is needed to signal a transition between process
+	*** environments which does not change anything (except the system label)
+	*** Specifying schedulers closely depends on these noop operations.
+	op sys-noop : -> SysLabel .
+	
+	*** The sys-newproc system label indicated that a process that is specified by
+	*** the process identifier in the first argument created a new process whose
+	*** PID and function form the remaining arguments.
+	op sys-newproc : Pid Pid Atom Atom ListConst -> SysLabel .
+	
+	*** Extending the sys-newproc label, this label additionally indicated that
+	*** the newly created process was atomically linked with its creator.
+	op sys-newproc-linked : Pid Pid Atom Atom ListConst -> SysLabel .
+	
+	*** The process identified by the first argument sends the message to the
+	*** process given by the second argument.
+	op sys-sendmsg : Pid Pid Const -> SysLabel .
+
+	*** The specified process receives the given message.
+	op sys-receive : Pid Const -> SysLabel .
+	
+	*** The specified process is waiting for the reception of a message and
+	*** a timeout occurs (the receive statement has a non-"infinity" timeout)
+	op sys-timeout : Pid -> SysLabel .	
+	
+	*** The process given in the first argument sends the exit signal to the
+	*** process that is specified in the second argument.
+	op sys-signal : Pid Pid Const -> SysLabel .
+	
+	*** The given process terminates (i.e. all exit-signals have been sent)
+	op sys-terminate : Pid -> SysLabel .
+	
+	*** A link between the two processes given in the arguments is established.
+	op sys-link : Pid Pid -> SysLabel .
+	
+	*** The link between the processes is teared down.
+	op sys-unlink : Pid Pid -> SysLabel .
+	
+	*** A flag representing changes of the trap-exit flag.
+	op sys-trapexit : Pid Atom -> SysLabel .
+	
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+
+	op #up : SysLabel -> Term [memo] .
+	op #downSysLabel : Term -> SysLabel [memo] .
+			
+	vars PID1 PID2 : Pid .
+	var C : Value .
+	vars A1 A2 : Atom .
+	vars T1 T2 T3 T4 T5 : Term .
+	
+	*** This function lifts a term of sort SysLabel to the first meta-level
+	*** It is needed to get formatted output of these labels.
+	eq #up(sys-start) = 'sys-start.SysLabel .
+	eq #up(sys-noop) = 'sys-noop.SysLabel .
+	eq #up(sys-newproc(PID1,PID2,A1,A2,C)) = 'sys-newproc[#up(PID1),#up(PID2),#up(A1),#up(A2),#up(C)] .
+	eq #up(sys-newproc-linked(PID1,PID2,A1,A2,C)) = 'sys-newproc-linked[#up(PID1),#up(PID2),#up(A1),#up(A2),#up(C)] .
+	eq #up(sys-sendmsg(PID1,PID2,C)) = 'sys-sendmsg[#up(PID1),#up(PID2),#up(C)] .
+	eq #up(sys-receive(PID1, C)) = 'sys-receive[#up(PID1),#up(C)] .
+	eq #up(sys-timeout(PID1)) = 'sys-timeout[#up(PID1)] .
+	eq #up(sys-signal(PID1,PID2,C)) = 'sys-signal[#up(PID1),#up(PID2),#up(C)] .
+	eq #up(sys-terminate(PID1)) = 'sys-terminate[#up(PID1)] .
+	eq #up(sys-link(PID1,PID2)) = 'sys-link[#up(PID1),#up(PID2)] .
+	eq #up(sys-unlink(PID1,PID2)) = 'sys-unlink[#up(PID1),#up(PID2)] .
+        eq #up(sys-trapexit(PID1, C)) = 'sys-trapexit[#up(PID1),#up(C)] .
+		
+	*** Lowering the representation level for system labels. This is needed, because
+	*** the result of the lts computation (which takes place on the meta-level) 
+	*** has to be lowered as soon as it is formatted for output.
+	eq #downSysLabel('sys-start.SysLabel) = sys-start .
+	eq #downSysLabel('sys-noop.SysLabel) = sys-noop .
+	eq #downSysLabel('sys-newproc[T1,T2,T3,T4,T5]) 
+		= sys-newproc(#downPid(T1), #downPid(T2), #downAtom(T3), #downAtom(T4), #downExpr(T5)) .
+	eq #downSysLabel('sys-newproc-linked[T1,T2,T3,T4,T5]) 
+		= sys-newproc-linked(#downPid(T1), #downPid(T2), #downAtom(T3), #downAtom(T4), #downExpr(T5)) .
+	eq #downSysLabel('sys-sendmsg[T1,T2,T3]) 
+		= sys-sendmsg(#downPid(T1), #downPid(T2), #downExpr(T3)) .
+	eq #downSysLabel('sys-receive[T1,T2]) = sys-receive(#downPid(T1), #downExpr(T2)) .
+	eq #downSysLabel('sys-timeout[T1]) = sys-timeout(#downPid(T1)) .
+	eq #downSysLabel('sys-signal[T1,T2,T3]) = sys-signal(#downPid(T1), #downPid(T2), #downExpr(T3)) .
+	eq #downSysLabel('sys-terminate[T1]) = sys-terminate(#downPid(T1)) .
+	eq #downSysLabel('sys-link[T1,T2]) = sys-link(#downPid(T1), #downPid(T2)) .
+	eq #downSysLabel('sys-unlink[T1,T2]) = sys-unlink(#downPid(T1), #downPid(T2)) .
+	eq #downSysLabel('sys-trapexit[T1,T2]) = sys-trapexit(#downPid(T1), #downExpr(T2)) .
+endfm

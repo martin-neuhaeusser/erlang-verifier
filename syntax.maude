@@ -1,0 +1,638 @@
+***(
+
+	SYNTAX.MAUDE
+	
+	This file includes the definitions that are needed in order to introduce the 
+	Core-Erlang signature.
+	We distinguish between two signatures: First, parsing is done by the signature
+	given within the PARSING_SYNTAX functional module. Variables and atoms are
+	parsed according to the Core-Erlang signature here.
+	Internally, we use the a slightly different syntactical representation of these
+	built in data types in that we introduce operators that specify the sort of 
+	the data-type (string, variable, etc.)
+	For example, a Core-Erlang atom 'some_atom' is represented internally by the
+	term atom("some_atom").
+	The internal syntax is defined in the functional module SYNTAX. Note 
+	however, that the two modules can be included both in other functional modules.
+	The part of the signature that is not affected by this distinction is defined
+	in the SYNTAX_COMMON functional module. The sorts representing the built in
+	data types are empty (i.e. there are no terms definable that have have one of
+	these sorts in the SYNTAX_COMMON module). 
+	Their constructors get defined in accordance to our distinction later in the
+	PARSING_SYNTAX and SYNTAX modules.
+	
+***)
+	
+fmod SYNTAX_COMMON is
+	protecting STRING .
+	protecting INT .
+	protecting FLOAT .
+
+	*** Declarations of the sorts for the Core-Erlang built in
+	*** data types. There are no corresponding operator declarations
+	*** for these terms; they get specified according to the internal
+	*** representation or the "external" representation that is used
+	*** by Core-Erlang.
+	sort Atom .
+	sort ErlInt .
+	sort ErlFloat . 
+	
+	*** The empty list constructor is defined as a special sort Nil,
+	*** which is declared as a subsort of the different list sorts.
+	sort Nil .
+	op [] : -> Nil [ctor format(m! m! o)] .
+
+	sort EmptyTuple .
+	op {} : -> EmptyTuple [ctor format(g! g! o)] .
+	
+	*** The sort "Literal" comprises all constant terms that are
+	*** not nested (such as tuples or lists of constants)
+	sort Literal .
+	subsort ErlInt ErlFloat Atom Nil EmptyTuple < Literal .	
+	
+	*** Erlang variables:
+	*** In addition to ordinary variables (their syntax is not defined here
+	*** but within the "specialisations" of this module - either for parsing
+	*** Core-Erlang source-code of parsing a meta-representation of the
+	*** internal syntax.
+	*** Note: Apart from these variables, function names are treated as
+	***       variables; they get bound to function bodies (which are
+	***	  accordingly treated as constants)
+	sort Var .
+	subsort FunName < Var .
+	sort FunName .
+	op _/_ : Atom ErlInt -> FunName [ctor prec 0 gather (E E) format (o sg! so o)] .
+	
+	
+	*** Here, we define the list concatenation operator _,_
+	*** This is a bit intricate since it is heavily overloaded and we have to
+	*** take care not to violate the preregularity requirement imposed by the
+	*** Maude system.
+	
+	*** variable list:  v1,v2,v3,...
+	*** Note: Here we define a list consisting entirely of variables. This is
+	***       used for the Variables sort (which is for example the argument sort of the
+	***       let operator).
+	sort NeVarList . 
+	subsort Var < NeVarList .
+	subsort NeFunNameList < NeVarList .
+	op _,_ : NeVarList NeVarList -> NeVarList [ctor assoc prec 60] .
+
+	
+	*** list of Core-Erlang function variables (=function names)	
+	*** In the header of the Core-Erlang module, there is a comma separated list of
+	*** function names that get exported. This is an example where this operator
+	*** is used. It just specifies a comma-separated list of function names; such
+	*** a list is automatically (as function names are treated like variables)
+	*** a nonempty variable list
+	sort NeFunNameList .
+	subsort FunName < NeFunNameList .	
+	op _,_ : NeFunNameList NeFunNameList -> NeFunNameList [ctor assoc prec 60] .
+	
+	
+	*** constant list: c1,c2,c3,...
+	sort NeConstList .
+	subsort Const < NeConstList .
+	op _,_ : NeConstList NeConstList -> NeConstList [ctor assoc prec 60] .		
+	
+		
+	*** mixed variable and constant list: c1,v1,v2,c2,v3... (preregularity requirement: var,const)
+	sort NeVarConstList .
+	subsort VarConst < NeVarConstList .
+	subsort Var < NeVarConstList .
+	subsort Const < NeVarConstList .
+	subsort NeVarList < NeVarConstList .
+	subsort NeConstList < NeVarConstList .
+	subsort NeFunNameList < NeVarConstList .
+	op _,_ : NeVarConstList NeVarConstList -> NeVarConstList [ctor assoc prec 60] .
+
+
+	*** list of single expressions: s1,s2,s3,...
+	*** This is a comma-separated list of single expressions. There are all Core-Erlang
+	*** expressions allowed with the exception of ordered sequences (which may not be
+	*** nested arbitrarily - therefore the distinction).
+	sort NeSingleExprList .
+	subsort SingleExpr < NeSingleExprList .
+	subsort NeVarConstList < NeSingleExprList .
+	op _,_ : NeSingleExprList NeSingleExprList -> NeSingleExprList [ctor assoc prec 60] .
+	
+	
+	*** list of expressions: e1,e2,e3,...
+	*** The difference to the single expression list is, that here also ordered
+	*** sequences are allows as list elements. This is prohibited in the single
+	*** expression list.
+	sort NeExprList .
+	subsort Expr < NeExprList .
+	subsort NeSingleExprList < NeExprList .
+	op _,_ : NeExprList NeExprList -> NeExprList [ctor assoc prec 60] .
+				
+
+	*** list of patterns: p1,p2,p3,...
+	sort NePatList .
+	subsort Pat < NePatList .
+	subsort AliasPat < NePatList .
+	subsort NeVarConstList < NePatList .					
+	subsort NeVarList < NePatList .
+	subsort NeConstList < NePatList .
+	op _,_ : NePatList NePatList -> NePatList [ctor assoc prec 60] .
+
+
+	*** Core-Erlang constants
+	*** We distinguish between constants and values. Constants are integers, strings, etc.
+	*** which can be nested within lists and tuples consisting entirely of constants.
+	sort Const .
+	subsort Literal < Const .
+	subsort Fun < Const .
+	subsort ListConst < Const .
+	subsort TupleConst < Const .
+									
+	
+	*** Core-Erlang values
+	*** Every constant is a value. Additionally, we allow ordered sequences of constants
+	*** here. The evaluation of a Core-
+	sort Value .
+	subsort Const < Value .
+	subsort ConstSeq < Value .
+	
+									
+	*** Core-Erlang variables _and_ constants
+	sort VarConst .
+	subsort Var < VarConst .
+	subsort Const < VarConst .		
+	subsort ListVarConst < VarConst .
+	subsort TupleVarConst < VarConst .						
+	
+	
+	*** Core-Erlang single expressions
+	sort SingleExpr .
+***	subsort Const < SingleExpr .
+***	subsort Var < SingleExpr .
+	subsort VarConst < SingleExpr .
+***	subsort Fun < SingleExpr .
+***	subsort FunName < SingleExpr .
+	subsort ErlTuple < SingleExpr .
+	subsort ErlList < SingleExpr .
+	
+	
+	*** Core-Erlang expressions
+	sort Expr .			
+	subsort SingleExpr < Expr .
+	subsort OSeq < Expr .
+
+		
+	*** Core-Erlang patterns
+	sort Pat .
+	subsort Var < Pat .
+	subsort Const < Pat .
+	subsort AliasPat < Pat .
+	subsort TuplePat < Pat .
+	subsort ListPat < Pat .
+	subsort VarConst < Pat .
+	
+	*** Core-Erlang alias pattern
+	sort AliasPat .
+	op _=_ : Var Pat -> AliasPat [ctor prec 10 gather (e e)] .
+
+	
+	*** Core-Erlang constant tuple
+	sort TupleConst .	
+	subsort EmptyTuple < TupleConst .
+	op {_} : NeConstList -> TupleConst [ctor prec 0 gather (&) format (g! o g! o)] .	
+	
+
+	*** Core-Erlang variable tuple
+	sort TupleVar .
+	subsort EmptyTuple < TupleVar .
+	op {_} : NeVarList -> TupleVar [ctor prec 0 gather (&) format (g! o g! o)] .
+	
+	
+	*** Core-Erlang tuple consisting of variables and tuples
+	sort TupleVarConst .
+	subsort TupleConst < TupleVarConst .
+	subsort TupleVar < TupleVarConst .
+	op {_} : NeVarConstList -> TupleVarConst [ctor prec 0 gather (&) format (g! o g! o)] .
+	
+	
+	*** Core-Erlang pattern tuple
+	sort TuplePat .
+	subsort TupleVarConst < TuplePat .
+	op {_} : NePatList -> TuplePat [ctor prec 0 gather (&) format (g! o g! o)] .
+	
+						
+	*** Core-Erlang expression tuple
+	sort ErlTuple .
+	subsort TupleVarConst < ErlTuple .
+	op {_} : NeExprList -> ErlTuple [ctor prec 0 gather (&) format (g! o g! o)] .
+
+	
+	*** Core-Erlang constant list	
+	sort ListConst .
+	subsort Nil < ListConst .
+	op [_] : NeConstList -> ListConst [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NeConstList Const -> ListConst [ctor prec 0 gather (& &) format (m! o m! o m! o)] .
+
+	
+	*** Core-Erlang variable list
+	sort ListVar .
+	subsort Nil < ListVar .
+	op [_] : NeVarList -> ListVar [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NeVarList Var -> ListVar [ctor prec 0 gather (& &) format (m! o m! o m! o)] .
+
+	
+	*** Core-Erlang list of variables and constants
+	sort ListVarConst .
+	subsort ListConst < ListVarConst .
+	subsort ListVar < ListVarConst .
+	subsort Nil < ListVarConst .
+	op [_] : NeVarConstList -> ListVarConst [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NeVarConstList VarConst -> ListVarConst [ctor prec 0 gather (& &) format (m! o m! o m! o)] .
+	
+		
+	*** Core-Erlang pattern list
+	sort ListPat .
+	subsort ListVarConst < ListPat .
+	op [_] : NePatList -> ListPat [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NePatList Pat -> ListPat [ctor prec 0 gather(& &) format (m! o m! o m! o)] .
+	
+			
+	*** Core-Erlang expression list
+	sort ErlList .	
+	subsort ListVarConst < ErlList . 
+	op [_] : NeExprList -> ErlList [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NeExprList Expr -> ErlList [ctor prec 0 gather (& &) format (m! o m! o m! o)] .
+
+	
+******************************************************************************************
+*** OSeq, Variables and Patterns syntax definition
+******************************************************************************************
+	
+	*** Empty list
+	sort EmptySeq .
+	op <> : -> EmptySeq [ctor format (g g)] .
+	
+	
+	*** Core-Erlang variables
+	sort VarSeq .
+	subsort EmptySeq < VarSeq .
+	op <_> : NeVarList -> VarSeq [ctor prec 0 gather (&) format (g so sg o)] .
+	
+
+	*** Core-Erlang constants
+	sort ConstSeq .
+	subsort EmptySeq < ConstSeq .
+	op <_> : NeConstList -> ConstSeq [ctor prec 0 gather (&) format (g so sg o)] .
+	
+	
+	*** Core-Erlang valuelists consisting of VarConst terms
+	sort VarConstSeq .
+	subsort VarSeq < VarConstSeq .
+	subsort ConstSeq < VarConstSeq .
+	op <_> : NeVarConstList -> VarConstSeq [ctor prec 0 gather (&) format (g so sg o)] .
+	
+	
+	*** Core-Erlang ordered sequences
+	sort OSeq .                               
+	subsort VarConstSeq < OSeq .
+	op <_> : NeSingleExprList -> OSeq [ctor prec 0 gather (&) format (g so sg o)] .
+
+	
+	*** Core-Erlang variables
+	sort Variables .
+	subsort VarSeq < Variables .
+	subsort Var < Variables .
+	
+	
+	*** Core-Erlang pattern sequences for the receive statement
+	sort Patterns .
+	subsort Pat < Patterns .
+	subsort VarConstSeq < Patterns .
+	op <_> : NePatList -> Patterns [ctor prec 0 gather (&) format (g o g o)] .
+
+
+******************************************************************************************
+*** syntax definition of Core-Erlang expressions
+******************************************************************************************
+
+	*** Core-Erlang clauses
+	sort Clause .
+	op _when_->_ : Patterns Expr Expr -> Clause [ctor prec 35 gather (e & &) format (o sm! so sm! so++ni o--)] .
+
+	
+	*** In case and receive statements sequences of clauses are used. Therefore
+	*** we declare a nonempty list (without delimiter symbol) of (possibly annotated) clauses:
+	sort NeClauseList .
+	subsort Clause < NeClauseList .
+	op __ : NeClauseList NeClauseList -> NeClauseList [ctor assoc prec 45 format (o ni ni)] .
+
+				
+	*** Core-Erlang case expression
+	sort Case .
+	op case_of_end : Expr NeClauseList -> Case [ctor prec 50 gather (& e) format (m! o m! o++ni m!--ni on)] .
+	subsort Case < SingleExpr .
+
+	*** Core-Erlang timeout 
+	sort TimeoutClause .
+	op after_->_ : Expr Expr -> TimeoutClause [ctor prec 45 gather(& &) format (m! so sm! so o)] .
+	
+	*** Core-Erlang receive statement
+	sort Receive .
+	op receive__ : NeClauseList TimeoutClause -> Receive [ctor prec 50 gather (& e) format (m! o++ni oni o--ni)] .
+	subsort Receive < SingleExpr .
+	
+	*** Core-Erlang let statement
+	sort Let .
+	op let_=_in_ : Variables Expr Expr -> Let [ctor prec 50 gather (E E E) format (m! os sm! o++ni m!--ni o++ni o--)] .
+	subsort Let < SingleExpr .
+	
+	*** Core-Erlang letrec statement
+	sort LetRec .
+	op letrec_in_ : NeFunDefList Expr -> LetRec [ctor prec 50 gather (& E) format (m! o m! o++ni o--)] .
+	subsort LetRec < SingleExpr .
+	
+	*** Core-Erlang apply statement
+	sort Apply .
+	op apply_(_) : Expr NeExprList -> Apply [ctor prec 50 gather (E &) format (m! o m! o m! o)] . 
+	op apply_() : Expr -> Apply [ctor prec 50 gather (E) format (m! o m! m! o)] .
+	subsort Apply < SingleExpr .
+	
+	*** Core-Erlang inter-module-call
+	sort InterModuleCall .
+	op call_:_(_) : Expr Expr NeExprList -> InterModuleCall [ctor prec 50 gather (E E &) format (m! os m!s os sm! o m! o)] . 
+	op call_:_() : Expr Expr -> InterModuleCall [ctor prec 50 gather (E E) format (m! os sm! os sm! m! o)] .
+	subsort InterModuleCall < SingleExpr .
+	
+	*** Core-Erlang built-in operation 
+	sort PrimOpCall .
+	op primop_(_) : Atom NeExprList -> PrimOpCall [ctor prec 50 gather (E &) format (m! o m! o m! oni)] .  
+	op primop_() : Atom -> PrimOpCall [ctor prec 50 gather (E) format (m! o m! m! oni)] .
+	subsort PrimOpCall < SingleExpr .
+	
+	*** Core-Erlang try construct
+	sort Try .
+	op try_of_->_catch_->_ : Expr Variables Expr Variables Expr -> Try [ctor prec 50 gather (E E E E E) format (m! o m! m! o m! o m! m! o++ni o--ni)] .
+	subsort Try < SingleExpr .
+	
+	*** Core-Erlang sequencing operator
+	sort Sequencing .
+	op do__ : Expr Expr -> Sequencing [ctor prec 50 gather (E E) format (m! o++ni oni o--ni)] .
+	subsort Sequencing < SingleExpr .
+	
+	*** Core-Erlang catch operator
+	sort Catch .
+	op catch_ : Expr -> Catch [ctor prec 50 gather (E) format (m! o oni)] .
+	subsort Catch < SingleExpr .
+
+	*** Core-Erlang function
+	sort Fun .
+	op fun(_)->_ : NeVarList SingleExpr -> Fun [ctor prec 50 gather (& E) format (b! b! os b!s b! os++ni o--ni)] .
+	op fun()->_ : SingleExpr -> Fun [ctor prec 50 gather (E) format (b! b! b! sb! os++ni o--ni)] .
+
+	*** Core-Erlang function definition
+	sort FunDef .
+	op _/_=_ : Atom ErlInt Fun -> FunDef [ctor prec 70 gather (e e e) format (o sr! os sr! os o)] .
+	
+	sort NeFunDefList .
+	op __ : NeFunDefList NeFunDefList -> NeFunDefList [ctor assoc prec 71 format (o nn o)] .
+	subsort FunDef < NeFunDefList .
+	
+******************************************************************************************
+*** syntax definition of Core-Erlang modules (header, exports, etc.)
+******************************************************************************************
+		
+	*** Core-Erlang module body 
+	sort ModuleBody .
+	subsort NeFunDefList < ModuleBody .
+	
+	*** Core-Erlang module attribute
+	sort ModuleAttribute .
+***	op _=_ : Atom Const -> ModuleAttribute [ctor prec 0 gather (E E) format (o sg! so o)] .
+			
+	sort NeModuleAttributeList .
+	op _,_ : NeModuleAttributeList NeModuleAttributeList -> NeModuleAttributeList [ctor prec 10 gather (e e) format (o y o o)] .
+	subsort ModuleAttribute < NeModuleAttributeList .
+	
+	*** Core-Erlang attributes
+	sort Attributes .
+	op attributes[_] : NeModuleAttributeList -> Attributes [ctor prec 20 gather (&) format (y y o y o)] .
+	op attributes[] : -> Attributes [ctor format (y y y y)] .
+	
+	*** Core-Erlang module
+	sort ErlModule .
+	op module_[_]__end : Atom NeFunNameList Attributes ModuleBody -> ErlModule [ctor prec 75 gather(& & & &) format (y++ g g g oni ni ni ny o)] .
+	op module_[]__end : Atom Attributes ModuleBody -> ErlModule [ctor prec 75 gather(& & &) format (y++ g g g oni ni ny o)] .
+endfm
+
+fmod SYNTAX is
+	extending SYNTAX_COMMON .
+	protecting STRING .
+	protecting INT .
+	protecting FLOAT .
+
+	op atom : String -> Atom [ctor format (b o)] .
+	op var : String -> Var [ctor format (b o)] .
+	op int : Int -> ErlInt [ctor format (b o)] .
+	op float : Float -> ErlFloat [ctor format (b o)] .
+endfm
+
+----------------------------------------------------------------------------------------------------
+---
+--- PARSING-SYNTAX
+---
+----------------------------------------------------------------------------------------------------
+
+fmod PARSING-SYNTAX is
+	protecting META-LEVEL .
+	extending SYNTAX_COMMON .
+
+	--- All the "user definable" terminals are parsed as tokens.
+	--- The sort Token has the only operator "token" that makes
+	--- it a bubble sort (see Chapter 11, Maude manual).
+	sort Token .
+		
+	--- All the terminals used in the grammar declaration are
+	--- supersorts of sort Token.
+	subsort Token < Atom Var ErlInt ErlFloat .
+	
+	sort NeTokenList .
+	subsort Token < NeTokenList .
+	op _,_ : NeTokenList NeTokenList -> NeTokenList [ctor assoc prec 60] .
+	
+	subsort NeTokenList < NeConstList .
+	subsort NeTokenList < NeVarList .
+	
+	sort TupleToken .
+	subsort TupleToken < TupleConst .
+	subsort TupleToken < TupleVar .
+	op {_} : NeTokenList -> TupleToken [ctor prec 0 gather (&) format(g! o g! o)] .
+	
+	sort ListToken .
+	subsort ListToken < ListConst .
+	subsort ListToken < ListVar .
+	op [_] : NeTokenList -> ListToken [ctor prec 0 gather (&) format (m! o m! o)] .
+	op [_|_] : NeTokenList Token -> ListToken [ctor prec 0 gather (& &) format (m! o m! o m! o)] .
+
+	sort TokenList .
+	subsort TokenList < VarSeq .
+	subsort TokenList < ConstSeq .
+	op <_> : NeTokenList -> TokenList [ctor prec 0 gather (&) format (g so sg o)] .
+endfm			
+
+----------------------------------------------------------------------------------------------------
+---
+--- INTERNAL-SYNTAX
+---
+----------------------------------------------------------------------------------------------------
+
+fmod MAUDE-SYNTAX-UP is
+	protecting SYNTAX .
+	protecting META-LEVEL .
+	protecting META-UP-DOWN .
+
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+
+	op #up : Atom -> Term [memo] .
+	op #up : Var -> Term [memo] .
+	op #up : ErlInt -> Term [memo] .
+	op #up : ErlFloat -> Term [memo] .
+	
+	op #up : TupleConst -> Term [memo] .
+	op #up : ListConst -> Term [memo] .
+	op #up : TuplePat -> Term [memo] .
+	op #up : ListPat -> Term [memo] .
+	op #up : AliasPat -> Term [memo] .
+	op #up : ErlTuple -> Term [memo] .
+	op #up : ErlList -> Term [memo] .
+
+	op #up : VarSeq -> Term [memo] .
+	op #up : Patterns -> Term [memo] .	
+	op #up : OSeq -> Term [memo] .
+
+	op #up : FunName -> Term [memo] .
+	op #up : Fun -> Term [memo] .
+	op #up : FunDef -> Term [memo] .	
+
+	op #up : Clause -> Term [memo] .
+
+	op #up : ErlModule -> Term [memo] .
+	op #up : Attributes -> Term [memo] .
+	
+	op #up : TimeoutClause -> Term [memo] .
+
+	op #up : LetRec -> Term [memo] .
+	op #up : Let -> Term [memo] .
+	op #up : Receive -> Term [memo] .
+	op #up : Case -> Term [memo] .
+	op #up : Apply -> Term [memo] .
+	op #up : InterModuleCall -> Term [memo] .
+	op #up : PrimOpCall -> Term [memo] .
+	op #up : Try -> Term [memo] .
+	op #up : Sequencing -> Term [memo] .
+	op #up : Catch -> Term [memo] .
+		
+	op #up : NeConstList -> Term [memo] .
+	op #up : NeVarList -> Term [memo] .
+	op #up : NePatList -> Term [memo] .
+	op #up : NeFunNameList -> Term [memo] .
+	op #up : NeFunDefList -> Term [memo] .
+	op #up : NeClauseList -> Term[memo]  .
+	op #up : NeExprList -> Term [memo] .
+
+	var STR : String .
+	var INT : Int .
+	var CHR : Char .
+	var FLT : Float .
+
+	eq #up(atom(STR)) = 'atom[#up(STR)] .
+	eq #up(var(STR)) = 'var[#up(STR)] .
+	eq #up(int(INT)) = 'int[#up(INT)] .
+	eq #up(float(FLT)) = 'float[#up(FLT)] .
+	eq #up([]) = '`[`].Nil .
+
+	var NECONSTLIST : NeConstList .
+	var NEPATLIST : NePatList .
+	var NEEXPRLIST : NeExprList .
+	var CONST : Const .
+	vars PAT PAT1 PAT2 : Pat .
+	vars EX EX1 EX2 : Expr .
+	var VAR : Var .
+
+	eq #up({NECONSTLIST}) = '`{_`}[#up(NECONSTLIST)] .
+	eq #up({}) = '`{`}.TupleConst .
+	eq #up([EX1 | EX2]) = '`[_|_`][#up(EX1), #up(EX2)] .
+	eq #up([PAT1 | PAT2]) = '`[_|_`][#up(PAT1), #up(PAT2)] .
+	eq #up({NEPATLIST}) = '`{_`}[#up(NEPATLIST)] .
+	eq #up(VAR = PAT) = '_=_[#up(VAR), #up(PAT)] .
+	eq #up({NEEXPRLIST}) = '`{_`}[#up(NEEXPRLIST)] .
+
+	var NEVARLIST : NeVarList .	
+
+	eq #up(< NEVARLIST >) = '<_>[#up(NEVARLIST)] .
+	eq #up(<>) = '<>.EmptySeq .
+	eq #up(< NEPATLIST >) = '<_>[#up(NEPATLIST)] .
+	eq #up(< NEEXPRLIST >) = '<_>[#up(NEEXPRLIST)] .
+
+	var EXPR : Expr .
+	var ATOM : Atom .
+	var ERLINT : ErlInt .
+	var FUN : Fun .
+
+	eq #up(ATOM / ERLINT) = '_/_[#up(ATOM),#up(ERLINT)] .
+	eq #up(fun()-> EXPR) = 'fun`(`)->_[#up(EXPR)] .
+	eq #up(fun(NEVARLIST)-> EXPR) = 'fun`(_`)->_[#up(NEVARLIST), #up(EXPR)] .
+	eq #up((ATOM / ERLINT = FUN).FunDef) = '_/_=_[#up(ATOM), #up(ERLINT), #up(FUN)] .
+	
+	vars EXPR1 EXPR2 EXPR3 : Expr .
+	var PATTERNS : Patterns .
+	eq #up(PATTERNS when EXPR1 -> EXPR2) = '_when_->_[#up(PATTERNS), #up(EXPR1), #up(EXPR2)] .
+	
+	var ATTRIBUTES : Attributes .	
+	var BODY : ModuleBody .
+	var NEFUNNAMELIST : NeFunNameList .
+
+	var VARS VARS1 VARS2 : Variables .
+	
+	eq #up((module ATOM [] ATTRIBUTES BODY end)) = 'module_`[`]__end[#up(ATOM), #up(ATTRIBUTES), #up(BODY)] .
+	eq #up((module ATOM [ NEFUNNAMELIST ] ATTRIBUTES BODY end)) = 'module_`[_`]__end[#up(ATOM), #up(NEFUNNAMELIST), #up(ATTRIBUTES), #up(BODY)] .
+
+	eq #up(after EXPR1 -> EXPR2) = 'after_->_[#up(EXPR1), #up(EXPR2)] .
+
+	var NEFUNDEFLIST : NeFunDefList .
+	var VARIABLES : Variables .
+	var CLAUSELIST : NeClauseList .
+	var TIMEOUT : TimeoutClause .
+	vars VAR1 VAR2 : Var .
+	
+	eq #up(letrec NEFUNDEFLIST in EXPR) = 'letrec_in_[#up(NEFUNDEFLIST), #up(EXPR)] .
+	eq #up(let VARIABLES = EXPR1 in EXPR2) = 'let_=_in_[#up(VARIABLES), #up(EXPR1), #up(EXPR2)] .
+	eq #up(receive CLAUSELIST TIMEOUT) = 'receive__[#up(CLAUSELIST), #up(TIMEOUT)] .
+	eq #up(case EXPR of CLAUSELIST end) = 'case_of_end[#up(EXPR), #up(CLAUSELIST)] .
+	eq #up(apply EXPR ()) = 'apply_`(`)[#up(EXPR)] .
+	eq #up(apply EXPR (NEEXPRLIST)) = 'apply_`(_`)[#up(EXPR), #up(NEEXPRLIST)] .
+	eq #up(call EXPR1 : EXPR2 ()) = 'call_:_`(`)[#up(EXPR1), #up(EXPR2)] .
+	eq #up(call EXPR1 : EXPR2 ( NEEXPRLIST )) = 'call_:_`(_`)[#up(EXPR1), #up(EXPR2), #up(NEEXPRLIST)] .
+	eq #up(primop ATOM ()) = 'primop_`(`)[#up(ATOM)] .
+	eq #up(primop ATOM ( NEEXPRLIST )) = 'primop_`(_`)[#up(ATOM), #up(NEEXPRLIST)] .
+	eq #up(try EXPR1 of VARS -> EXPR2 catch VARS2 -> EXPR3) = 'try_of_->_catch_->_[#up(EXPR1), #up(VARS), #up(EXPR2), #up(VARS2), #up(EXPR3)] .
+	eq #up(do EXPR1 EXPR2) = 'do__[#up(EXPR1), #up(EXPR2)] . 
+	eq #up(catch EXPR) = 'catch_[#up(EXPR)] .
+
+
+	vars NECONSTLIST1 NECONSTLIST2 : NeConstList .
+	vars NEVARLIST1 NEVARLIST2 : NeVarList .
+	vars NEPATLIST1 NEPATLIST2 : NePatList .
+	vars NEEXPRLIST1 NEEXPRLIST2 : NeExprList .
+	vars NEFUNNAMELIST1 NEFUNNAMELIST2 : NeFunNameList .
+	vars NEFUNDEFLIST1 NEFUNDEFLIST2 : NeFunDefList .
+	vars NECLAUSELIST1 NECLAUSELIST2 : NeClauseList .	
+
+	*** all the terms with outermost operator symbol _,_ or __
+	eq #up(NECONSTLIST1, NECONSTLIST2) = '_`,_[#up(NECONSTLIST1), #up(NECONSTLIST2)] .
+	eq #up(NEVARLIST1, NEVARLIST2) = '_`,_[#up(NEVARLIST1), #up(NEVARLIST2)] .
+	eq #up(NEPATLIST1, NEPATLIST2) = '_`,_[#up(NEPATLIST1), #up(NEPATLIST2)] .
+	eq #up(NEEXPRLIST1, NEEXPRLIST2) = '_`,_[#up(NEEXPRLIST1), #up(NEEXPRLIST2)] .
+	eq #up(NEFUNNAMELIST1, NEFUNNAMELIST2) = '_`,_[#up(NEFUNNAMELIST1), #up(NEFUNNAMELIST2)] .
+	eq #up(NEFUNDEFLIST1 NEFUNDEFLIST2) = '__[#up(NEFUNDEFLIST1), #up(NEFUNDEFLIST2)] .
+	eq #up(NECLAUSELIST1 NECLAUSELIST2) = '__[#up(NECLAUSELIST1), #up(NECLAUSELIST2)] .
+endfm

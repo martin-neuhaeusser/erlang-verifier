@@ -1,0 +1,10 @@
+debug red in SEM_SUBSTITUTION : #subst(
+do
+  case { var("Var1"), int(2) } of
+    < { var("Var2"), var("Var3") } > when var("Var2") -> var("Var1")
+    < { var("Var2"), var("Var1") } > when var("Var1") -> var("Var1")
+    < { var("Var2"), var("Var3") } > when var("Var1") -> var("Var1")
+  end
+  var("Var1")
+,
+var("Var1") --> int(99), var("Var2") --> int(100)) .

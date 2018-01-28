@@ -1,0 +1,12 @@
+debug reduce in SEM_EQUATIONS : 
+(sys-start, < tau | #no-res
+       | call atom("erlang") : atom("tl") ([[int(1),int(2),int(3),[]],int(1), int(2), int(3), [int(4),int(5),int(6)], int(5),int(6)]) 
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | #empty-modenv >,
+#empty-modenv,
+pid(0))
+
+.

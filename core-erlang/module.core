@@ -1,0 +1,23 @@
+(add-module((module 'mod1' ['f' / 2, 'g' / 2]
+    attributes [ ]
+('f' / 2 =
+    fun (X,Y) ->
+	apply 'g' / 2 (X,Y))
+('g' / 2 =
+    fun (X,Y) ->
+        case < call 'mod2' : 'f'(X,Y) > of
+	  < 0 > when 'true' -> 'ok'
+	  < Z > when 'true' -> apply 'f' / 2 (Z,Y)
+	end)
+end)))
+
+(add-module((module 'mod2' ['f' / 2, 'g' / 2]
+    attributes [ ]
+('f' / 2 =
+    fun (X,Y) ->
+        apply 'g' / 1 (X))
+('g' / 1 =
+    fun (X) ->
+        call 'erlang' : '-' (X,1))
+end)))
+

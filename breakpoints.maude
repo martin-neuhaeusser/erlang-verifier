@@ -1,0 +1,96 @@
+***(
+	BREAKPOINTS.MAUDE
+	
+	The oriented equations of the equational theory	and the rewriting
+	rules that model the system's transitions are equipped with labels.
+	This modules defines breakpoints s.t. whenever the Maude engine
+	does a rewrite step using one of these rules (in conditions or at
+	the top level), it stops and enters the debugger.
+	
+	Note: By commenting out some of the blocks, one can select when
+	      the Maude engine should stop. Thereby one can examine the
+	      different states during execution.
+
+***)
+ 
+
+*** Breakpoints at all rules of the equational theory
+break select norm-const .
+break select norm-unbound .
+break select norm-list .
+break select norm-tuple .
+break select norm-oseq .
+break select norm-let .
+break select norm-call .
+break select norm-apply .
+break select norm-case .
+break select norm-do .
+break select norm-primop .
+break select norm-try .
+break select norm-catch .
+break select norm-receive .
+break select norm-letrec .
+
+
+*** Breakpoints at the rewriting rules that model transitions
+break select sys-spawn .
+break select sys-spawnlink .
+break select sys-send .
+break select sys-receive .
+break select sys-timeout .
+break select sys-termsignal .
+break select sys-procterm .
+break select sys-link .
+break select sys-unlink .
+
+
+*** Breakpoints at all the rules (belonging to the equational theory)
+*** which model the semantics of the most important functions contained
+*** in the Core-Erlang standard library
+break select core-spawn .
+break select core-spawnlink .
+break select core-syneq .
+break select core-plus .
+break select core-minus .
+break select core-mul .
+break select core-equal .
+break select core-less .
+break select core-le .
+break select core-greater .
+break select core-ge .
+break select core-and .
+break select core-or .
+break select core-not .
+break select core-self .
+break select core-send .
+break select core-exit .
+break select core-throw .
+break select core-link .
+break select core-unlink .
+break select core-processflag .
+break select core-tupletolist .
+break select core-list++ .
+break select core-list-- .
+break select core-list-head .
+break select core-list-tail .
+break select core-list-length .
+
+
+*** the implemented list manipulation functions:
+break select lists-append .
+break select lists-delete .
+break select lists-member .
+
+
+*** the output functions that are recognised:
+break select io-format .
+break select io-nl .
+break select io-putchars .
+
+
+*** Finally, we enforce the breakpoints.
+set break on .
+
+print conceal (_==>_) .
+print conceal (_/_=_) .
+set print conceal on .

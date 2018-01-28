@@ -1,0 +1,14 @@
+debug reduce in THEORY : 
+(sys-start, < tau | #no-res
+       | let < var("Fun"), var("test") > = 
+             < (fun() -> int(2)), (fun() -> apply var("Fun") ()) > in
+	         apply var("test") ()
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | #empty-modenv >,
+#empty-modenv,
+pid(0))
+
+.

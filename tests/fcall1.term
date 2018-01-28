@@ -1,0 +1,13 @@
+debug reduce in SEM_EQUATIONS : 
+(sys-start, < tau | #no-res 
+       | letrec (atom("Fun") / int(2) = fun(var("X"), var("Y")) -> call atom("erlang") : atom("+") (var("X"), var("Y"))) in
+                 apply atom("Fun") / int(2) (int(1), int(2))
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | #empty-modenv >,
+#empty-modenv,
+pid(0))
+
+.

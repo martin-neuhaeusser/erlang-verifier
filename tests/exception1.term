@@ -1,0 +1,19 @@
+set trace substitution off .
+trace exclude SEM_SUBSTITUTION .
+debug reduce in THEORY : 
+(sys-start, < tau | #no-res
+       | let var("Fun") = fun() -> 
+             case int(0) of 
+                  < int(5), var("Value") > when atom("true") -> 
+                       var("Value") 
+             end 
+         in
+	     try apply var("Fun") () of 
+                  < var("Var1") > -> {var("Var1")}
+	     catch < var("Var1") > -> var("Var1")
+	| pid(0) 
+	| #empty-mbox 
+	| #empty-pid-seq 
+	| false 
+	| #empty-modenv >, 
+#empty-modenv, pid(0)) .

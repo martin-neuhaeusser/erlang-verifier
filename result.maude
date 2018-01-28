@@ -1,0 +1,86 @@
+***(
+
+	RESULT.MAUDE
+	
+	Our system comprises two layers: On the one hand the equational theory that captures 
+	all the evaluation steps that happen in the context of a single process (that do not
+	yield any side effects) and on the other hand the rewriting theory that models the
+	inter-process communication due to evaluating side-effect afflicted expressions.
+	
+	Therefore we need a bidirectional communication between these two layers. 
+	The process' label describes the current state of the process; they are chosen s.t. 
+	they provide sufficient information for the rules of the rewriting theory.
+	The results (mainly, if the side-effect is erroneous or not) of the evaluation within
+	the rewriting steps needs to be propagated back to the directed equations of the
+	underlying equational theory. The SysResult-terms defined here provide this facility.
+	
+***)
+
+fmod SEM_RESULT is 
+	protecting BOOL .
+	protecting INT .
+	protecting META-UP-DOWN .
+	
+	*** The result that is returned to the equational theory depends on the
+	*** side effect that took place. We consider
+	***    * the result of spawning a new process: The PID of the
+	***      newly created process is returned
+	***    * when a process waits for a message and a timeout is specified,
+	***      the occurrence of a timeout is modelled within the rewriting
+	***      theory (it is considered as an event "from the outside")
+	***    * Setting up links can fail when the requested link partner
+	***      does not exist. The separated processes do not "know" anything
+	***      about the existence of other processes; therefore such a failure
+	***	 must be propagated back from the system level.
+	***    * The same applies when sending messages: It may happen, that the
+	***      receiver does not exist.
+	
+	sort SysResult .
+	sort EmptyResult .
+	sort SpawnResult .
+	sort TimeoutResult .
+	sort LinkResult .
+	sort SendResult .
+	sort SignalResult .
+	
+	subsort SpawnResult < SysResult .
+	subsort EmptyResult < SysResult .
+	subsort TimeoutResult < SysResult .
+	subsort LinkResult < SysResult .
+	subsort SendResult < SysResult .
+	subsort SignalResult < SysResult .
+		
+	op #no-res : -> EmptyResult [ctor] .
+	op #res-spawn : Int -> SpawnResult [ctor] .
+	op #res-timeout : -> TimeoutResult [ctor] .
+	op #res-send : Bool -> SendResult [ctor] .
+	op #res-link : Bool -> LinkResult [ctor] .
+	op #res-signal : Bool -> SignalResult [ctor] .
+		
+	*******************************
+        *** METAREPRESENTATION PART ***
+	*******************************
+
+	op #up : SysResult -> Term [memo] .
+	op #downSysResult : Term -> SysResult [memo] .
+	
+	var T : Term .
+	var INT : Int .
+	var BOOL : Bool .
+	
+	*** Implementation of the meta-representation part
+	eq #up(#no-res) = '#no-res.EmptyResult .
+	eq #up(#res-spawn(INT)) = '#res-spawn[#up(INT)] .
+	eq #up(#res-timeout) = '#res-timeout.TimeoutResult .
+	eq #up(#res-send(BOOL)) = '#res-send[#up(BOOL)] .
+	eq #up(#res-link(BOOL)) = '#res-link[#up(BOOL)] .
+	eq #up(#res-signal(BOOL)) = '#res-signal[#up(BOOL)] .
+
+	*** Lowering the meta-representation level of expression level labels
+	eq #downSysResult('#no-res.EmptyResult) = #no-res .
+	eq #downSysResult('#res-spawn[T]) = #res-spawn(#downInt(T)) .
+	eq #downSysResult('#res-timeout.TimeoutResult) = #res-timeout .
+	eq #downSysResult('#res-send[T]) = #res-send(#downBool(T)) .
+	eq #downSysResult('#res-link[T]) = #res-link(#downBool(T)) .
+	eq #downSysResult('#res-signal[T]) = #res-signal(#downBool(T)) .
+endfm

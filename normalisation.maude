@@ -1,0 +1,688 @@
+***(
+
+	NORMALISATION.MAUDE
+	
+	This file contains the modules that constitute the core of the equational theory.
+	The equational theory is split into different modules and different files as follows:
+	
+	normalisation.maude: This file comprises the SEM_NORMALISATION module that defines
+			     the most important equations, the SEM_LIST_NORMALFORM that
+			     contains oriented equations that normalize lists into the
+			     constructor-form (in contrast to the flat (comma-separated)
+			     representation that is also valid within Core-Erlang).
+			     The SEM_HELPER module defines some equations that are needed
+			     within the conditions of the "real" equations and that help
+			     to combine cases which otherwise would have to be distinguished
+			     explicitly.
+	
+	corebib.maude:	     First, this file contains the specification of the most important
+			     functions that are provided by the Erlang standard library 'erlang'.
+			     Additional libraries ('io' and 'lists') are also partially implemented.
+
+	primop.maude:	     This module contains some Core-Erlang primitive operations; primops
+			     are evaluated for example when evaluating a case statement where no
+			     clause matches the switch-value. In this case, the primop raises
+			     an exception.
+***)
+
+fmod SEM_HELPER is
+	protecting SEM_LABEL .
+	protecting SEM_EXCEPTION .
+	protecting SEM_BINDING .
+	protecting SYNTAX .
+	
+	var EX : Expr .
+	var EXLIST : NeExprList .
+	var EL : Label .
+	var FUN : Fun .
+	var A : Atom .
+	var INT : ErlInt .
+
+	vars FDLIST FDLIST1 FDLIST2 : NeFunDefList .
+	var VLIST : NeVarList .
+	
+	*** The #lengthExprList function returns the number of elements in the given
+	*** expression list (i.e. a comma separated list of Core-Erlang expressions)
+	*** It is used for the computation of the arity of functions that are
+	*** called via inter module calls.
+	op #lengthExprList : NeExprList -> Int .
+	eq #lengthExprList(EX) = 1 .
+	eq #lengthExprList(EX, EXLIST) = 1 + #lengthExprList(EXLIST) .
+
+	*** Subexpressions are often evaluated within the conditions of an equation that
+	*** applies to the whole expression. For example when considering the sequencing
+	*** operator: The first subexpression is evaluated entirely within the conditions
+	*** of the outer "do"-equation.
+	*** The evaluation can terminate normally (i.e. the expression was evaluated to
+	*** a constant value) or by a side-effect or an exception.
+	*** In the latter cases, the label indicates the exception / side effect and 
+	*** also becomes the label of the "surrounding" process.
+	*** In the case of normal termination, the evaluation is continued and we do
+	*** not signal termination just because the evaluation within the conditions
+	*** terminated. The #filterExit function allows to subsume these two cases:
+	*** If the label indicates normal termination, we continue with a tau label.
+	*** Otherwise, we indicate the side-effect and stop normalisation.
+	op #filterExit : Label -> Label [memo] .
+	eq #filterExit(exception(exit, atom("normal"))) = tau .
+	eq #filterExit(EL) = EL [owise] .
+	
+	*** The #extract-local-functions operation is a helper function
+	*** to extract the functions which are declared within a letrec
+	*** statement. The return value is a corresponding FunEnv.
+	op #extract-local-functions : NeFunDefList -> Env [memo] .
+	eq #extract-local-functions(A / INT = FUN FDLIST) = (A / INT --> FUN), #extract-local-functions(FDLIST) .
+	eq #extract-local-functions(A / INT = FUN) = A / INT --> FUN .
+
+	*** #involveFunDef propagates the function definitions given in the 2nd argument into each
+	*** of the function definition that are given by the first argument.
+	*** This is done by introducing an appropriate letrec statement into the function bodies
+	*** It is needed due to the possibility of cyclic function definitions by letrec statements.
+	op #involveFunDef : NeFunDefList NeFunDefList -> NeFunDefList [memo] .
+	eq #involveFunDef(A / INT = fun() -> EX FDLIST1, FDLIST2) 
+		= A / INT = fun() -> letrec FDLIST2 in EX #involveFunDef(FDLIST1, FDLIST2) .
+	eq #involveFunDef(A / INT = fun() -> EX, FDLIST2) 
+		= A / INT = fun() -> letrec FDLIST2 in EX .	
+	eq #involveFunDef(A / INT = fun(VLIST) -> EX FDLIST1, FDLIST2) 
+		= A / INT = fun(VLIST) -> letrec FDLIST2 in EX #involveFunDef(FDLIST1, FDLIST2) .
+	eq #involveFunDef(A / INT = fun(VLIST) -> EX, FDLIST2) 
+		= A / INT = fun(VLIST) -> letrec FDLIST2 in EX .	
+endfm 
+
+
+fmod SEM_LIST_NORMALFORM is
+	protecting SYNTAX .
+	
+	var EXLIST : NeExprList .
+	vars EX1 EX2 : Expr .
+	vars P1 P2 : Pat .
+	var PATLIST : NePatList .
+
+	*** The #getListElements helper function creates a comma separated
+	*** list of the elements of the Core-Erlang list provided as argument.
+	*** Note: It does not return a Core-Erlang list, but just a nonempty
+	***       sequence of expressions, separated by commata.
+	op #getListElements : ErlList -> NeExprList .
+		
+	*** Equivalences for the Core-Erlang list constructors. We normalise lists 
+	*** to the standard cons-form [Head|Tail] with [] indicating the empty list.
+	eq [EXLIST] = [EXLIST | []] .
+	eq [EXLIST, EX1 | EX2] = [EXLIST | [EX1 | EX2]] . 
+	
+	*** The same applies to lists that are patterns. This unique normal form
+	*** eases pattern matching operations.	
+	eq [PATLIST] = [PATLIST | []] .
+	eq [PATLIST, P1 | P2] = [PATLIST | [P1 | P2]] .		
+	
+	*** Here follow the defining equations for the #getListElements function
+	*** Note: This function is undefined in case that its argument is the
+	***       empty list. This condition has to be checked before #getListElements
+	***	  is called.
+	eq #getListElements([EX1 | []]) = EX1 .
+	ceq #getListElements([EX1 | EX2]) = [EX1 | EX2] 
+		if not(EX2 :: ErlList) .
+	eq #getListElements([EX1 | EX2]) = EX1, #getListElements(EX2) [owise] .
+endfm
+
+
+fmod SEM_NORMALISATION is
+	protecting SYNTAX .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting SEM_SUBSTITUTION .
+	protecting SEM_MATCH .
+	protecting SEM_MATCH_MAILBOX .
+	protecting SEM_HELPER .	
+	protecting SEM_LIST_NORMALFORM .
+	
+	
+	vars EX EX1 EX2 EX3 EX' EX1' EX2' GUARD : Expr .
+	vars EXLIST EXLIST1 EXLIST' : NeExprList .
+	vars ME ME' : ModEnv .
+	vars PID PID1 : Pid .
+	vars MBOX MBOX' : Mailbox .
+	vars TRAP : Bool .
+	vars A1 A2 : Atom .
+	vars FDLIST FDLIST1 FDLIST2 : NeFunDefList .
+	vars VLIST VLIST1 VLIST2 : NeVarList .
+	vars RES RES1 : SysResult .
+	
+	var INT : Int .
+	var STR : String .
+	var EL : Label .
+	var ESL : StopLabel .
+	var EXCLASS : ExceptionClass .
+	var LINKS : PidSequence .
+	var V : Var .
+	var C : Value .
+	var VARS : Variables .
+	var CLAUSE : Clause .
+	var CLAUSES : NeClauseList .
+	var PAT : Patterns .
+	var ENV : Env .
+	var FUN : Fun .
+	var CLIST : NeConstList .
+			
+				
+	*** constants
+	*** Note: The corresponding process terminates because it has fully evaluated its expression.
+	***       Therefore we raise an exception that indicates the "normal" termination
+	eq [norm-const] :
+	   < tau | #no-res | C | PID | MBOX | LINKS | TRAP | ME > =
+	   < exception(exit, atom("normal")) | #no-res | C | PID | MBOX | LINKS | TRAP | ME > .
+		   
+
+		   		   
+		   
+	*** Variables cannot occur as an outermost expression (i.e. an expression that has to be evaluated)
+	*** since we substitute them as soon as they get bound. If they appear anyway, we have an unbound 
+	*** variable and throw an exception.
+	eq [norm-unbound] :
+	   < tau | RES | var(STR) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | RES | primop atom("raise") (atom("error"), {atom("unbound_var"), [atom(STR) | []]}) | PID | MBOX | LINKS | TRAP | ME > .
+	
+	
+		   
+		    	
+	*** normalisation of lists
+	*** Note: We only have to consider the cons-form of Core-Erlang lists here,
+	***       as any list gets normalized into this normal form by the equations
+	***	  from the SEM_LIST_NORMALFORM functional module.
+	*** If the head element of the list is not fully evaluated (i.e. the corresponding
+	*** term representation is not of sort Const), we evaluate it further within the
+	*** equation's condition.
+	ceq [norm-list] :
+	    < tau | RES | [EX1 | EX2] | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | [EX1' | EX2] | PID | MBOX | LINKS | TRAP | ME > 
+		if not(EX1 :: Const) 
+		/\ < ESL | RES1 | EX1' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX1 | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** In the case that the head element is a constant, we check if the tail of
+	*** the list can be evaluated further (i.e. the term [EX] is not a constant);
+	*** if it is not already a constant, we continue evaluation of the tail-list
+	*** within the equation's conditions.
+	ceq [norm-list] :
+	    < tau | RES | [C | EX] | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | [C | EX'] | PID | MBOX | LINKS | TRAP | ME > 
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	       
+	       
+	*** normalisation of tuples
+	*** The normalisation of tuples proceeds similar to the list evaluation.
+	*** We do not have the distinction between head and tail but a flattened,
+	*** comma-separated list of expressions.
+	*** First we evaluate the head element further if it is not fully
+	*** evaluated yet:
+	ceq [norm-tuple] :
+	    < tau | RES | {EX, EXLIST} | PID | MBOX | LINKS | TRAP | ME > =
+    	    < #filterExit(ESL) | RES1 | {EX', EXLIST} | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** Because of the "flat" representation of tuples, we have to care about
+	*** three cases here instead of two cases when considering lists:
+	*** Here we check the one-elementary tuple explicitly:
+	ceq [norm-tuple] :
+	    < tau | RES | {EX} | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | {EX'} | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** If the first component is a constant, we continue evaluation of the
+	*** tuple that consists of the remaining elements.       
+	ceq [norm-tuple]: 
+	    < tau | RES | {C, EXLIST} | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | {C, EXLIST'} | PID | MBOX | LINKS | TRAP | ME >
+		if not(EXLIST :: Const) 
+		/\ < ESL | RES1 | {EXLIST'} | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | {EXLIST} | PID | MBOX | LINKS | TRAP | ME > .
+
+	       
+	       
+	       
+	*** normalisation of ordered sequences
+	*** The evaluation of ordered sequences is fully analogous to the tuple
+	*** evaluation.
+	ceq [norm-oseq] :
+	    < tau | RES | < EX, EXLIST > | PID | MBOX | LINKS | TRAP | ME > =
+    	    < #filterExit(ESL) | RES1 | < EX', EXLIST > | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	ceq [norm-oseq] :
+	    < tau | RES | < EX > | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | < EX' > | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+	    	/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	ceq [norm-oseq] :
+	    < tau | RES | < C, EXLIST > | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | < C, EXLIST' > | PID | MBOX | LINKS | TRAP | ME >
+		if not(EXLIST :: Const) 
+		/\ < ESL | RES1 | < EXLIST' > | PID | MBOX | LINKS | TRAP | ME > :=
+	 	   < tau | RES | < EXLIST > | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	       
+	       	       
+	       
+	*** let statement
+	*** Note: The let statement evaluates the expression; this yields an ordered sequence
+	***       of values (constants). The arity of this ordered sequence is required to
+	***       coincide with that of the variable sequence.
+	***	  The variables given in the VARS sequence are then bound to the values of
+	***	  the evaluated expression, pairwise. The scope of the binding is the entire
+	***	  expression EX1.
+	***	  This can be rewritten equivalently into a case statement: The expression
+	***	  EX becomes the switch expression and the variable sequence forms the pattern
+	***	  that is matched against the evaluated switch expression.
+	eq [norm-let] :
+	   < tau | #no-res | let VARS = EX in EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | case EX of VARS when atom("true") -> EX1 end | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	   
+	    
+	    
+	*** inter-module call without arguments
+	*** The inter-module call semantics is intricate as it changes the "current module". If a call
+	*** to another module is made, all functions defined therein are locally available during
+	*** evaluation of the body of the called function from that module. 
+	*** When specifying the semantics, we therefore select all functions of the called module
+	*** yielding this module's environment ME' and then construct a corresponding letrec
+	*** statement that makes all functions available. 
+	*** The call itself is then nothing but an application of the function given by the argument
+	*** to the call statement.
+	*** Note: Calls to built-in functions of the Erlang run-time system are masked here as they
+	***       are treated by corresponding equations in other modules.
+	ceq [norm-call] :
+	    < tau | #no-res | call A1 : A2 () | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | letrec FDLIST in apply A2 / int(0) () | PID | MBOX | LINKS | TRAP | ME >
+		if A1 =/= atom("erlang") 
+		/\ A1 =/= atom("io") 
+		/\ A1 =/= atom("lists") 
+		/\ ME' := #getModule(A1, ME) 
+		/\ ME' =/= #empty-modenv 
+		/\ FDLIST := #getFunDefList(ME') .
+
+	*** If the module specified cannot be found and is not one of the built-in libraries, we throw
+	*** an exception indicating failure and the requested module's name.
+	ceq [norm-call] :
+	    < tau | #no-res | call A1 : A2 () | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | primop atom("raise") (atom("error"), {atom("unknown_module"), A1}) | PID | MBOX | LINKS | TRAP | ME >
+		if A1 =/= atom("erlang") 
+		/\ A1 =/= atom("io") 
+		/\ A1 =/= atom("lists") 
+		/\ ME' := #getModule(A1, ME) 
+		/\ ME' == #empty-modenv .
+	
+	*** Before we can evaluate the inter-module call itself, we have to evaluate the expressions
+	*** which finally yield the values that serve as arguments.
+	ceq [norm-call] :
+	    < tau | RES | call EX1 : EX2 () | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | call EX1' : EX2' () | PID | MBOX | LINKS | TRAP | ME >
+		if not({EX1, EX2} :: Const) 
+		/\ < ESL | RES1 | {EX1', EX2'} | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | {EX1, EX2} | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	       
+	       
+	       
+	*** call statement with arguments
+	*** This case is analogous to the inter-module call with an empty argument list.
+	*** When we change to the new module, we calculate the arity of the specified
+	*** function be counting the number of arguments. We then rewrite the inter-module
+	*** call into the apply/letrec combination as above.
+	ceq [norm-call] :
+	    < tau | #no-res | call A1 : A2 (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | letrec FDLIST in apply A2 / int(INT) (CLIST) | PID | MBOX | LINKS | TRAP | ME >
+		if A1 =/= atom("erlang") 
+		/\ A1 =/= atom("io") 
+		/\ A1 =/= atom("lists") 
+		/\ INT := #lengthExprList(CLIST) 
+		/\ ME' := #getModule(A1, ME) 
+		/\ ME' =/= #empty-modenv 
+		/\ FDLIST := #getFunDefList(ME') .
+	
+	*** As in the case without arguments, we have to consider the case that we are unable to
+	*** find the requested module. A corresponding exception is thrown in this case.
+	ceq [norm-call] :
+	    < tau | #no-res | call A1 : A2 (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | primop atom("raise") (atom("error"), atom("unknown_module")) | PID | MBOX | LINKS | TRAP | ME >
+		if A1 =/= atom("erlang") 
+		/\ A1 =/= atom("io") 
+		/\ A1 =/= atom("lists") 
+		/\ INT := #lengthExprList(CLIST) 
+		/\ ME' := #getModule(A1, ME) 
+		/\ ME' == #empty-modenv .
+
+	*** Currently, we do not implement every function of the Core-Erlang standard library. Small subsets
+	*** are available for the 'erlang', 'io' and 'lists' libraries. If a built-in function is called that
+	*** is not implemented (there is no definition in the corresponding functional modules), we indicate
+	*** the failure by an exception that states the library name and the name of the missing function.
+	*** The otherwise attribute is crucial here: It guarantees that there is no other matching equation
+	*** in the included functional modules that implement the "known" library functions.
+	ceq [norm-call-fail] :
+	    < tau | #no-res | call A1 : A2 (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | primop atom("raise") (atom("error"), {atom("missing_library_function"), A1, A2}) | PID | MBOX | LINKS | TRAP | ME > 
+		if (A1 == atom("erlang") or
+		    A1 == atom("io") or
+		    A1 == atom("lists")) [owise] .
+	
+	*** The following rule is fully analogous to the one above. Here we consider the case that a unknown
+	*** library function is called that has no arguments (this case is not covered by the nonempty argument
+	*** pattern above)
+	ceq [norm-call-fail] :
+	    < tau | #no-res | call A1 : A2 () | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | primop atom("raise") (atom("error"), {atom("missing_library_function"), A1, A2}) | PID | MBOX | LINKS | TRAP | ME >
+		if (A1 == atom("erlang") or
+		    A1 == atom("io") or
+		    A1 == atom("lists")) [owise] .
+	       
+	*** The module name and the function name can be given as expressions that have to be
+	*** evaluated. The same applies to the arguments that need to evaluate to values that
+	*** can serve as actual parameters.       
+	ceq [norm-call] : 
+	    < tau | RES | call EX : EX1 (EXLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | call EX2 : EX3 (EXLIST1) | PID | MBOX | LINKS | TRAP | ME >
+		if not({EX, EX1, EXLIST} :: Const) 
+		/\ < ESL | RES1 | {EX2, EX3, EXLIST1} | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | {EX, EX1, EXLIST} | PID | MBOX | LINKS | TRAP | ME > .
+
+	       
+	 
+	       
+	*** Apply statement	       	       	       
+	*** Apply statement without arguments; the function name given as an argument to
+	*** the apply statement is substituted by the corresponding function body as soon
+	*** as the function name gets bound (for example by an inter-module call or evaluation
+	*** of a letrec statement).
+	eq [norm-apply] :
+	   < tau | #no-res | apply (fun() -> EX) () | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** Apply statement with arguments. In addition to the case above, here we consider
+	*** the (already normalised) actual parameters supplied to the function.
+	*** This is done by introducing the binding of the actual to the formal parameters
+	*** using a corresponding case statement.
+	eq [norm-apply] :
+	   < tau | #no-res | apply (fun(VLIST) -> EX) (CLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | case {CLIST} of {VLIST} when atom("true") -> EX end | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** Normalisation of the arguments to the apply statement.
+	*** Note: The expression EX is evaluated and required to yield a constant that is a function
+	***       body. Note also, that function bodies (statements of the form fun(arglist) -> ex)
+	***       are considered as constants that "contain" the function's semantics.
+	ceq [norm-apply] :
+	    < tau | RES | apply EX (EXLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | apply EX' (EXLIST') | PID | MBOX | LINKS | TRAP | ME >
+		if not({EX, EXLIST} :: Const) 
+		/\ < ESL | RES1 | {EX', EXLIST'} | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | {EX, EXLIST} | PID | MBOX | LINKS | TRAP | ME > .
+	
+	*** Again, we have to consider the case of an empty argument list explicitly:
+	*** Here we only normalize the expression that must evaluate to a function statement.
+	*** Note: Function statements are treated as constants (such a constant encapsulates
+	***       the semantics of the function / represents the code of the function)
+	ceq [norm-apply] :
+	    < tau | RES | apply EX () | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | apply EX' () | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	       
+	       
+	       
+	       	       
+	*** case statement
+	*** Case 1: The first clause matches the expression. If the guard evaluates to true, we continue with the
+	***         corresponding rhs in the updated environment. If the guard does not evaluate to true, we continue
+	***         the evaluation with the modified case statement (the first clause is removed).
+	ceq [norm-case] :
+	    < tau | #no-res | case C of PAT when GUARD -> EX CLAUSES end | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | EX2 | PID | MBOX | LINKS | TRAP | ME >
+		if ENV := #match(PAT, C) 
+		/\ < exception(exit, atom("normal")) | #no-res | EX1 | PID | #empty-mbox | LINKS | TRAP | ME > :=
+		   < tau | #no-res | #subst(GUARD,ENV) | PID | #empty-mbox | LINKS | TRAP | ME > 
+		/\ EX2 := if EX1 == atom("true") 
+			  	then #subst(EX, ENV)
+			   	else case C of CLAUSES end 
+		          fi .
+	
+	*** Case 2: The switch constant C does not match the first clause.
+	***         Therefore we remove the first clause from the clause list and continue evaluation of the 
+	***	    "shrinked" case statement.
+      	ceq [norm-case] :
+	    < tau | #no-res | case C of PAT when GUARD -> EX CLAUSES end | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | case C of CLAUSES end | PID | MBOX | LINKS | TRAP | ME >
+		if not(#match(PAT, C) :: Env) .
+
+	*** Case 3: The last remaining clause matches the expression. If the guard evaluates to true, we continue with the
+	***         corresponding rhs in the updated environment. If the guard does not evaluate to true, we throw an
+	***         exception indicating a matching failure.
+	ceq [norm-case] :
+	    < tau | #no-res | case C of PAT when GUARD -> EX end | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | EX2 | PID | MBOX | LINKS | TRAP | ME >
+		if ENV := #match(PAT, C) 
+		/\ < exception(exit, atom("normal")) | #no-res | EX1 | PID | #empty-mbox | LINKS | TRAP | ME > :=
+		   < tau | #no-res | #subst(GUARD, ENV) | PID | #empty-mbox | LINKS | TRAP | ME > 
+		/\ EX2 := if EX1 == atom("true") 
+		          	then #subst(EX, ENV)
+			  	else primop atom("raise") (atom("error"), atom("kernel_match_error")) 
+			  fi .
+	       
+	*** Case 4: Here the lhs of the last remaining clause does not even match the expression.
+	*** Again, a corresponding exception is raised:
+      	ceq [norm-case] :
+	    < tau | #no-res | case C of PAT when GUARD -> EX end | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | primop atom("raise") (atom("error"), atom("kernel_match_error")) | PID | MBOX | LINKS | TRAP | ME >
+		if not(#match(PAT, EX) :: Env) .
+	
+	*** Case 5: The expression of the case statement is not normalised yet.
+	*** Its normalisation either succeeds by normal termination of the corresponding process or by
+	*** aborting due to an exception:
+	ceq [norm-case] :
+	    < tau | RES | case EX of CLAUSES end | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | case EX1 of CLAUSES end | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX1 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	       
+	       
+	       
+	*** do statement
+	*** Case 1: The first subexpression is not fully evaluated yet. We continue evaluation of the
+	***         expression within the equations conditions. 
+	ceq [norm-do] :
+	    < tau | RES | do EX1 EX2 | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | do EX1' EX2 | PID | MBOX | LINKS | TRAP | ME > 
+		if not(EX1 :: Const) 
+		/\ < ESL | RES1 | EX1' | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX1 | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** Case 2: The 1st expression is fully normalised (i.e. it is a constant).
+	*** We remove the "do"-context thereby ignoring the result C of the evaluation of the first subexpression 
+	*** and continuing the evaluation of the second subexpression in the unmodified (w.r.t. the evaluation of the
+	*** first subexpression) environment:
+	eq [norm-do] :
+	   < tau | #no-res | do C EX2 | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | EX2 | PID | MBOX | LINKS | TRAP | ME > .
+	
+
+	       
+	       
+	*** Normalisation of the arguments to primop-calls:
+	*** Note: The semantics of some primitive operations is implemented by according equations
+	***       within the SEM_PRIMOP functional module. They mostly deal with throwing exceptions.
+	ceq [norm-primop] :
+	    < tau | RES | primop EX1 (EXLIST) | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | primop EX1' (EXLIST') | PID | MBOX | LINKS | TRAP | ME > 
+		if not({EX1, EXLIST} :: Const) 
+	    	/\ < ESL | RES1 | {EX1', EXLIST'} | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | {EX1, EXLIST} | PID | MBOX | LINKS | TRAP | ME > .
+	   	
+	
+	
+	
+	*** try-catch statement
+	*** First case: The protected expression is not evaluated yet and during its evaluation, no exception occurs.
+	*** Therefore the evaluating process terminates normally with exception({atom("EXIT"), atom("normal")}):
+	ceq [norm-try] :
+	    < tau | RES | try EX of < VLIST1 > -> EX1 catch < VLIST2 > -> EX2 | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | case EX3 of < VLIST1 > when atom("true") -> EX1 end | PID | MBOX | LINKS | TRAP | ME >
+		if not(EX :: Const) 
+		/\ < exception(exit, atom("normal")) | #no-res | EX3 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** Second case: The protected expression can be evaluated further but during its evaluation, an exception occurs.
+	*** The evaluating process terminates indicating the kind of exception: The exception is caught by the surrounding
+	*** catch statement and the value of the exception is given back (evaluation of the catch-clause):
+  	ceq [norm-try] :
+	    < tau | RES | try EX of < VLIST1 > -> EX1 catch < VLIST2 > -> EX2 | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | case C of < VLIST2 > when atom("true") -> EX2 end | PID | MBOX | LINKS | TRAP | ME > 
+		if not(EX :: Const) 
+		/\ < exception(EXCLASS, C) | #no-res | EX3 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > 
+		/\ (C =/= atom("normal") or EXCLASS =/= exit) .
+
+	*** Third case: During the evaluation of the "protected" expression, a side effect occurs. The try-catch 
+	*** context is not removed, but the evaluation stops signalling the side-effect within the process' label.
+  	ceq [norm-try] :
+	    < tau | RES | try EX of < VLIST1 > -> EX1 catch < VLIST2 > -> EX2 | PID | MBOX | LINKS | TRAP | ME > =
+	    < ESL | RES1 | try EX3 of < VLIST1 > -> EX1 catch < VLIST2 > -> EX2 | PID | MBOX | LINKS | TRAP | ME > 
+		if < ESL | RES1 | EX3 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > 
+		/\ not(ESL :: ExceptionLabel) .
+
+
+	
+
+	*** erlang catch statement where no exception occurs during the evaluation of the expression
+	*** Because the expression is fully evaluated, we can exchange from the catch context into the fully evaluated expression itself: 
+ 	ceq [norm-catch] :
+	    < tau | RES | catch EX | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | EX1 | PID | MBOX | LINKS | TRAP | ME > 
+		if < exception(exit, atom("normal")) | #no-res | EX1 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .
+	       
+	*** erlang catch statement where the evaluation of the expression yields an exception
+	*** The evaluation of the expression yields an exception indicating a failure 
+	*** (i.e. not the special {'EXIT', {normal}} exception that just indicates normal termination
+	***  of the evaluation)
+	ceq [norm-catch] :
+	    < tau | RES | catch EX | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | C | PID | MBOX | LINKS | TRAP | ME > 
+		if < exception(EXCLASS, C) | #no-res | EX1 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > 
+		/\ (EXCLASS =/= exit or C =/= atom("normal")) .
+
+	*** normalisation of the expression protected by the catch statement yields a side effect
+	ceq [norm-catch] :
+	    < tau | RES | catch EX | PID | MBOX | LINKS | TRAP | ME > =
+	    < ESL | RES1 | catch EX1 | PID | MBOX | LINKS | TRAP | ME > 
+		if < ESL | RES1 | EX1 | PID | MBOX | LINKS | TRAP | ME > :=
+		   < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > 
+		/\ not(ESL :: ExceptionLabel) .
+
+	       
+		
+	
+	*** receive statement
+	*** Case 1: We evaluate a receive statement and find a matching message in the mailbox.
+	***         It does not matter if a timeout is specified (or 'infinity' is given) because
+	***         a timeout event did not take place (this is indicated by the #no-res) result;
+	***         if a timeout happened, the corresponding system-level transition would have
+	***         marked it by setting the result value to #res-timeout.
+	*** The result from the #mailboxMatch function contains the expression (where the
+	*** variables that got bound within the receive-clause's pattern are already substituted)
+	*** that has to be evaluated further, the message that has been received and the new
+	*** mailbox where the received message is removed.
+	ceq [norm-receive] :
+	    < tau | #no-res | receive CLAUSES after EX -> EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	    < receive(C) | #no-res | EX2 | PID | MBOX | LINKS | TRAP | ME >
+		if (EX :: ErlInt) or (EX == atom("infinity")) 
+	    	/\ #mailboxMatchSuccess(EX2 | C) := #mailboxMatch(CLAUSES | MBOX | ME) .
+
+	*** Case 2: In the receive statement, a timeout value of "infinity" is specified and there is no
+	*** matching message in the mailbox. In this case, we cannot evaluate further. The corresponding
+	*** process is blocked (indicated by the corresponding process label). If a message is ultimately
+	*** sent to the process, (this happens on the system level), the blocked process is automatically
+	*** unblocked during message delivery (the system level rewrite rule sets the process label back
+	*** to tau; thereby the receive statement is evaluated again and a matching can occur).
+	ceq [norm-receive] :
+	    < tau | #no-res | receive CLAUSES after atom("infinity") -> EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	    < blocked | #no-res | receive CLAUSES after atom("infinity") -> EX1 | PID | MBOX | LINKS | TRAP | ME > 
+		if #mailboxMatchFailure := #mailboxMatch(CLAUSES | MBOX | ME) .
+
+	*** Case 3: Evaluation of the receive statement without a matching message in the process's mailbox and
+	*** with a non-infinity timeout specified. No timeout has occurred as indicated by the corresponding
+	*** return value (#no-res) of the process term. Therefore we go into the waiting state.
+	*** Note: We distinguish between the blocked state, that is assumed whenever we wait for a message
+	*** infinitely. Otherwise, we indicate the possibility of a timeout by changing into the waiting
+	*** state. Here, the system level rewrite rules can non-deterministically execute a timeout step.
+	ceq [norm-receive] :
+	    < tau | #no-res | receive CLAUSES after int(INT) -> EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	    < waiting | #no-res | receive CLAUSES after int(INT) -> EX1 | PID | MBOX | LINKS | TRAP | ME > 
+		if #mailboxMatchFailure := #mailboxMatch(CLAUSES | MBOX | ME) .
+
+   	*** Case 4: Evaluation of the receive statement with a non-infinity timeout specified (as above). 
+	*** In this subcase, a timeout has occurred (indicated by the return value #res-timeout).
+	*** Therefore we remove the receive context and evaluate the timeout expression.
+	*** Note: The occurrence of a timeout event supersedes the test if there is a matching message in the
+	***       mailbox. This is necessary because the timeout event is already reflected by a corresponding 
+	***       system level transition (and therefore already visible).
+	eq [norm-receive] :
+	   < tau | #res-timeout | receive CLAUSES after int(INT) -> EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	   < tau | #no-res | EX1 | PID | MBOX | LINKS | TRAP | ME > .
+	    
+	*** Here we normalise the timeout argument within the equation's conditions.
+	ceq [norm-receive] :
+	    < tau | RES | receive CLAUSES after EX -> EX1 | PID | MBOX | LINKS | TRAP | ME > =
+	    < #filterExit(ESL) | RES1 | receive CLAUSES after EX2 -> EX1 | PID | MBOX | LINKS | TRAP | ME > 
+		if not(EX :: Const) 
+		/\ < ESL | RES1 | EX2 | PID | MBOX | LINKS | TRAP | ME > :=
+	           < tau | RES | EX | PID | MBOX | LINKS | TRAP | ME > .		
+		
+	       
+
+
+	*** the core erlang letrec statement:
+	*** The functions that are defined by the function definition list of the letrec statement
+	*** are valid within
+	***
+	***   a. the letrec statement's expression (EX)
+	***   b. the function bodies of all functions that are declared 
+	***      in the letrec statement's function definition list 
+	***
+	*** Therefore we "propagate" the function definition into the function bodies of the
+	*** declared functions. By doing so, the function names get instantiated by the
+	*** function bodies (the function names get substituted by the function body) whenever
+	*** a corresponding function is applied.
+	***
+	*** Example: A function definition list of the form
+	***            
+	***   FDLIST1 = 'fun1'/1 = fun(Var) -> Var+1 
+	***             'fun2'/0 = fun() -> apply 'fun1'(1)
+	***            
+	***            is rewritten (by propagating the function definitions) to
+	***
+	***   FDLIST2 = 'fun1'/1 = fun(Var) -> letrec FDLIST1 in Var+1
+	***             'fun2'/0 = fun() -> letrec FDLIST1 in apply 'fun1'(1)
+	***
+	*** The letrec statement's expression is then rewritten by substituting the function
+	*** names with the corresponding function bodies, taken from the (modified) FDLIST2:
+	***
+	*** #subst(EX, ENV(FDLIST1))
+	
+	ceq [norm-letrec] :
+	    < tau | #no-res | letrec FDLIST1 in EX | PID | MBOX | LINKS | TRAP | ME > =
+	    < tau | #no-res | #subst(EX, ENV) | PID | MBOX | LINKS | TRAP | ME > 
+		if FDLIST2 := #involveFunDef(FDLIST1, FDLIST1) 
+		/\ ENV := #extract-local-functions(FDLIST2) .
+endfm 	     

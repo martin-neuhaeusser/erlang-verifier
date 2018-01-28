@@ -1,0 +1,32 @@
+load ../syntax.maude
+
+*** nur Variablen
+red in SYNTAX : var("Var1"), var("Var2"), var("Var3") :: NeVarList .
+red in SYNTAX : not(var("Var1"), var("Var2"), var("Var3") :: NeConstList) .
+red in SYNTAX : var("Var1"), var("Var2"), var("Var3") :: NePatList .
+red in SYNTAX : var("Var1"), var("Var2"), var("Var3") :: NeSingleExprList .
+
+*** Variablen und Konstanten
+red in SYNTAX : not(var("Var1"), var("Var2"), int(2) :: NeVarList) .
+red in SYNTAX : not(var("Var1"), var("Var2"), int(2) :: NeConstList) .
+red in SYNTAX : var("Var1"), int(2), var("Var2") :: NePatList .
+red in SYNTAX : var("Var1"), int(2), var("Var2") :: NeSingleExprList .
+
+*** Variablen und Alias-Patterns
+red in SYNTAX : not(var("Var1"), var("Var2"), var("Alias") = atom("Pattern") :: NeVarList) .
+red in SYNTAX : not(var("Var1"), var("Var2"), var("Alias") = atom("Pattern") :: NeConstList) .
+red in SYNTAX : var("Var1"), var("Var2"), var("Alias") = atom("Pattern") :: NePatList .
+red in SYNTAX : not(var("Var1"), var("Var2"), var("Alias") = atom("Pattern") :: NeSingleExprList) .
+
+*** Konstanten und Alias-Patterns
+red in SYNTAX : not(int(1), int(2), var("Alias") = atom("Pattern") :: NeVarList) .
+red in SYNTAX : not(int(1), int(2), var("Alias") = atom("Pattern") :: NeConstList) .
+red in SYNTAX : int(1), int(2), var("Alias") = atom("Pattern") :: NePatList .
+red in SYNTAX : not(int(1), int(2), var("Alias") = atom("Pattern") :: NeSingleExprList) .
+
+*** Variablen, Konstanten und Alias-Patterns
+red in SYNTAX : not(var("Var1"), int(2), var("Alias") = atom("Pattern") :: NeVarList) .
+red in SYNTAX : not(var("Var1"), int(2), var("Alias") = atom("Pattern") :: NeConstList) .
+red in SYNTAX : var("Var1"), int(2), var("Alias") = atom("Pattern") :: NePatList .
+red in SYNTAX : not(var("Var1"), int(2), var("Alias") = atom("Pattern") :: NeSingleExprList) .
+

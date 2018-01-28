@@ -1,0 +1,271 @@
+***(
+
+	MATCHING.MAUDE
+
+	In this file we implement the pattern matching code. Both Maude modules
+	that are defined here are functional modules. This is important as they
+	are used within the conditions of the equations of the underlying
+	equational theory. 
+	
+	First, ordinary pattern matching is specified in the SEM_MATCH functional
+	module. The #match operation takes a pattern and a constant and tries to
+	match the pattern against the constant.
+	
+	Second, the SEM_MATCH_MAILBOX functional module defines the more subtle
+	operations needed to match the clauses of a receive statement against
+	the contents of a mailbox.
+	The reception of messages is more complicated as it uses two levels
+	of recursion: The clauses are recursively matched against the first
+	message in the mailbox; if there is no match, the clause list is
+	again matched against the remaining messages. The recursion terminates
+	when the first match is found or every message of the mailbox has failed
+	to match any clause.
+	As the clauses may contain guards (additional conditions that control 
+	if the clause may be evaluated in case of a matching pattern), we need the
+	equational theory to evaluate the guard expressions. Note however,
+	that according to the Core-Erlang semantics, there must not occur any 
+	system level transitions during the evaluation of a guard (i.e. no send
+	or receive statements, etc). Therefore the equational theory suffices
+	and we never have to switch to the rewriting rules of the system level.
+
+***)
+
+fmod SEM_MATCH is
+	protecting SYNTAX .
+	extending SEM_SUBSTITUTION .
+	
+	*** As most of the pattern matching operations are partial functions
+	*** because of possible matching failures, we declare an error supersort of Env:
+	sort Env? .
+	subsort Env < Env? .
+
+	*** The #nomatch constructor indicates the failure of a matching
+	*** operation. If it is included in a variable environment and since
+	*** it is not of sort Env, the resulting term is of kind [Env?].
+	*** In this way, we distinguish between successful and unsuccessful
+	*** matching operations.
+	op #nomatch : -> Env? [ctor] .
+	
+	*** The #match operation tries to match the given pattern with the
+	*** constant provided as second argument. Because there may be many
+	*** variables that have to be bound to unify the two terms, the
+	*** result term is of sort Env (and not just a single Binding).
+	op #match : Pat Const ~> Env .
+	
+	*** To deal with lists of patterns that are possibly matched against
+	*** a list of expressions we additionally declare the #matchSequence
+	*** operation.
+	op #matchSequence : NePatList NeConstList ~> Env .	
+	
+	var VAR : Var .
+	var CONST : Const . 
+	var PATSEQ : NePatList .
+	var CONSTSEQ : NeConstList .
+	vars PAT PAT1 PAT2 : Pat .
+	vars C C1 C2 : Const .
+		
+	*** The first case: Matching of a variable against a constant.
+	eq #match(VAR, CONST) = (VAR --> CONST) .
+	
+	*** The second case: Two identical terms are unified (without the need to
+	*** bind any variables)
+	*** Note: The cases of matching two empty lists [] or two 0-ary tuples {}
+	***       are implicitly covered here, too.
+	eq #match(CONST, CONST) = #empty-env .
+	
+	*** Sometimes, the compiler generates case statements with the empty
+	*** ordered sequence as the switch-value and empty patterns.
+	*** This yields a successful matching without binding any variables.
+	eq #match(<>, <>) = #empty-env .
+	
+	*** Matching of more complex patterns: 
+	*** An ordered sequence of patterns is matched against an ordered sequence 
+	*** of constants by matching the corresponding sequences.
+	eq #match(< PATSEQ >, < CONSTSEQ >) = #matchSequence(PATSEQ, CONSTSEQ) .
+	
+	*** A single pattern (a variable or a tuple for example) is matched
+	*** against a single constant that is written as an ordered sequence:
+	eq #match(PAT, < CONST >) = #matchSequence(PAT, CONST) .
+	
+	*** A single pattern that is written in ordered-sequence-brackets is matched against
+	*** a single constant (without the ordered-sequence-brackets):
+	eq #match(< PATSEQ >, CONST) = #matchSequence(PATSEQ, CONST) .
+	
+	*** A pattern is possibly a tuple. Here we match a tuple consisting
+	*** of patterns against a tuple of constants:
+	eq #match({PATSEQ}, {CONSTSEQ}) = #matchSequence(PATSEQ, CONSTSEQ) .
+	
+	*** A pattern may be a list. Therefore we match a list of patterns
+	*** against a list of constants by pairwise matching the list elements.
+	eq #match([PAT1 | PAT2], [C1 | C2]) = #match(PAT1, C1), #match(PAT2, C2) .
+		
+	*** The semantics of the alias pattern is that the pattern is matched
+	*** against the constant and the variable is bound to the constant
+	eq #match(VAR = PAT, CONST) = #match(PAT, CONST), #match(VAR, CONST) .
+	
+	*** All other cases lead to an incorrect matching.
+	eq #match(PAT, CONST) = #nomatch [owise] .
+
+	
+	
+	
+	*** The #matchSequence operation matches sequences of patterns against
+	*** sequences of constants by recursively applying the #match operation
+	*** on the elements of the lists (pairwise).
+	eq #matchSequence(PAT, CONST) = #match(PAT, CONST) .
+	eq #matchSequence((PAT, PATSEQ), (CONST, CONSTSEQ)) 
+		= #match(PAT, CONST), #matchSequence(PATSEQ, CONSTSEQ) .
+	eq #matchSequence(PATSEQ, CONSTSEQ) = #nomatch [owise] .
+endfm 
+
+
+
+
+fmod SEM_MATCH_MAILBOX is
+	extending SYNTAX .
+	protecting SEM_MATCH .
+	protecting SEM_PROCESS .
+		
+	*** During the receive operation, we have to try to match each of the clauses in the
+	*** receive statement against every message (i.e. constant) in the process' mailbox.
+	*** The messages are processed in a FIFO manner. The algorithm is as follows:
+	*** 1. Try matching the clauses of the receive statement against the first message
+	***    Stop as soon as a matching clause is found.
+	*** 2. Try to evaluate its guard expression. If it evaluates to the Core-Erlang
+	***    atom 'true', the matching is successful.
+	*** 3. If no clause matches the first message (in the sense of 1 and 2), remember the 
+	***    first message and proceed with the rest of the mailbox (go back to 1).
+	*** 3. Matching fails, if no match is found and all messages have been tested.
+	*** 4. If matching succeeds, return the matching clause's right hand expression
+	***    and the mailbox without the received message.
+	*** Note: The specification here deeply relies on Maude's ability to do matching
+	***       modulo associativity and identity-elements. See the definition of the
+	***	  process-mailbox within the SEM_MAILBOX functional module for more
+	***	  information.
+	
+		
+	*** The syntax of Core-Erlang does not allow an empty clause list as this would make 
+	*** no sense in the context of the receive statement. But we have several recursive 
+	*** traversals of all clauses, we need a possibly empty clause list here. Therefore
+	*** we extend the definition within this module to allow even empty clause lists:
+	sort ClauseList .
+	subsort Clause < ClauseList .
+	op #empty-clauselist : -> ClauseList [ctor] .
+	op _,_ : ClauseList ClauseList -> ClauseList [ctor assoc id: #empty-clauselist] .
+		
+	*** The result of a mailbox-matching operation is represented by terms of sort
+	*** ClauseMatchResult. 
+	sort ClauseMatchResult .
+
+	*** The external interface for the matching operation is the 3ary #mailboxMatch
+	*** operation. Its arguments are
+	*** 1. The clause list of the receive statement
+	*** 2. The mailbox of the process
+	*** 3. The module environment (in order to evaluate guards)
+	op #mailboxMatch(_|_|_) : NeClauseList Mailbox ModEnv -> ClauseMatchResult .
+		
+	*** The matching operation is performed internally by the #mailboxMatch function: 
+	*** Its arguments are as follows:
+	*** 1. The unaltered list of all clauses in the receive statement 
+	***    (need to be remembered during recursion!)
+	*** 2. The unaltered list of all messages in the process' mailbox 
+	***    (need to be remembered during recursion!)
+	*** 3. The clauses that must still be matched against the current message
+	***    (if matching fails, the corresponding clause is removed from this list)
+	*** 5. The messages which still have to be checked
+	*** 6. The module environment (needed for guard evaluation)
+	op #mailboxMatch(_|_|_|_) : ClauseList ClauseList Mailbox ModEnv -> ClauseMatchResult .
+	
+	*** The #mailboxMatchSuccess term represents a successful matching. It consists of 
+	*** 1. The expression on the rhs of the matching clause
+	***    Free occurrences of variables that became bound by the matching operation are 
+	***    already substituted by their corresponding values.
+	*** 2. The message that matched and was removed from the mailbox.
+	op #mailboxMatchSuccess(_|_) : Expr Const -> ClauseMatchResult [ctor] .
+	
+	*** Failure of the matching operation is indicated by the #mailboxMatchFailure
+	*** constant:
+	op #mailboxMatchFailure : -> ClauseMatchResult [ctor] .
+
+	*** The #extractMessage operation removes the first occurrence of the message
+	*** that is given in the 2nd argument from the mailbox.
+	op #extractMessage(_|_) : Mailbox Const -> Mailbox .
+	op #extractMessage(_|_|_) : Mailbox Const Mailbox -> Mailbox .
+	
+	var CLAUSE : Clause .
+	var NECLLIST : NeClauseList .
+	vars CLAUSES CLAUSES1 : ClauseList .
+	var PAT : Patterns .
+	vars EX EX1 : Expr .
+	vars MBOX MBOX1 MBOX2 : Mailbox .
+	vars ENV : Env .
+	vars CONST CONST1 : Const .
+	var GUARD : Expr .
+	var ME : ModEnv .
+
+	*** The clause list that we use within this module is a comma separated, associative
+	*** list with the identity-element #empty-clauselist. To convert a clause list (according
+	*** to the Core-Erlang syntax) into our representation, we use the #clauseList function:
+	*** Note: Using our representation here instead of sticking to the Core-Erlang syntax
+	***       and reusing it has the advantage that we do not have to consider as many cases:
+	***	  Clauselists consisting of multiple clauses and those consisting of only one
+	***	  clause coincide because of the identity element #empty-clause-list.
+	op #clauseList : NeClauseList -> ClauseList .
+	eq #clauseList(CLAUSE) = CLAUSE .
+	eq #clauseList(CLAUSE NECLLIST) = CLAUSE, #clauseList(NECLLIST) .
+	
+	*** Initialisation step for the matching operation
+	*** We start with the entire mailbox and the complete list of clauses.
+	ceq #mailboxMatch(NECLLIST | MBOX | ME) =
+	    #mailboxMatch(CLAUSES | CLAUSES | MBOX | ME) 
+		if CLAUSES := #clauseList(NECLLIST) .
+
+	*** If the mailbox is empty, we return a matching failure immediately.
+	eq #mailboxMatch(CLAUSES | CLAUSES1 | #empty-mbox | ME) = #mailboxMatchFailure .
+	   
+	*** The current clause does not match the current message (constant). 
+	*** We delete the clause and continue with the
+	*** next clause in the clauselist.
+	*** Note: The case of only one clause in the clauselist is covered by this rule
+	***       due to the identity declaration of the #empty-clauselist constant. A 
+	***       clauselist consisting of one clause only unifies with the pattern CLAUSE CLAUSES1
+	***       by substituting CLAUSES1 by the identity-element #empty-clauselist.
+	ceq #mailboxMatch(CLAUSES | CLAUSE, CLAUSES1 | CONST : MBOX2 | ME) =
+            #mailboxMatch(CLAUSES | CLAUSES1 | CONST : MBOX2 | ME)
+		if (PAT when GUARD -> EX) := CLAUSE 
+		/\ not(#match(PAT, CONST) :: Env) .
+
+	*** The current message matches the current clause but the clause's condition cannot be
+	*** evaluated to 'true'. Therefore we delete the clause and continue with the next one.
+	ceq #mailboxMatch(CLAUSES | CLAUSE, CLAUSES1 | CONST : MBOX2 | ME) =
+	    #mailboxMatch(CLAUSES | CLAUSES1 | CONST : MBOX2 | ME)
+		if (PAT when GUARD -> EX) := CLAUSE 
+		/\ ENV := #match(PAT, CONST) 
+		/\ < exception(exit, atom("normal")) | #no-res | EX1 | pid(0) | #empty-mbox | #empty-pid-seq | false | ME > :=
+		   < tau | #no-res | #subst(GUARD, ENV) | pid(0) | #empty-mbox | #empty-pid-seq | false | ME > 
+		/\ EX1 =/= atom("true") .
+
+	*** The current message matches the current clause and the condition (guard) can
+	*** be evaluated to atom("true"). In this case we stop and return #mailboxMatchSuccess
+	ceq #mailboxMatch(CLAUSES | CLAUSE, CLAUSES1 | CONST : MBOX2 | ME) =
+	    #mailboxMatchSuccess(#subst(EX, ENV) | CONST)
+		if (PAT when GUARD -> EX) := CLAUSE 
+		/\ ENV := #match(PAT, CONST) 
+		/\ < exception(exit, atom("normal")) | #no-res | atom("true") | pid(0) | #empty-mbox | #empty-pid-seq | false | ME > :=
+		   < tau | #no-res | #subst(GUARD, ENV) | pid(0) | #empty-mbox | #empty-pid-seq | false | ME > .
+	
+	*** If none of the clauses matched the current message, we consider the next message 
+	*** in the mailbox (w.r.t. the complete clause list). The old head element of the
+	*** mailbox is forgotten.
+	*** Note: There are no more clauses in the clause list. The case of a one-elementary
+	***       clause list is covered by the rules above together with the identity declaration
+	***       of the _,_ : ClauseList ClauseList -> ClauseList operator.
+	eq #mailboxMatch(CLAUSES | #empty-clauselist | CONST : MBOX2 | ME) =
+ 	   #mailboxMatch(CLAUSES | CLAUSES | MBOX2 | ME) .
+	
+	eq #extractMessage(MBOX | CONST) = #extractMessage(#empty-mbox | CONST | MBOX) .	
+	eq #extractMessage(MBOX1 | CONST | CONST : MBOX2) = MBOX1 : MBOX2 .
+	eq #extractMessage(MBOX1 | CONST | #empty-mbox) = MBOX1 .
+	eq #extractMessage(MBOX1 | CONST | CONST1 : MBOX2) 
+	       = #extractMessage(MBOX1 : CONST1 | CONST | MBOX2) [owise] .
+endfm

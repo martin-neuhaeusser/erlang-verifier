@@ -1,0 +1,40 @@
+red in THEORY :
+(sys-start,
+< tau | #no-res
+      | call atom("mod1") : atom("f") (int(3), int(0))
+      | pid(0)
+      | #empty-mbox
+      | #empty-pid-seq
+      | false
+      | glob(atom("mod1"), atom("f") / int(2)) ==>
+    fun( var("X"),var("Y") )->
+  apply atom("g") / int(2)(var("X"),var("Y"))
+,glob(atom("mod1"), atom("g") / int(2)) ==> fun( var("X"),var("Y") )->
+  case < call atom("mod2") : atom("f") (var("X"),var("Y")) > of
+    < int(0) > when atom("true") ->
+      atom("ok")
+    < var("Z") > when atom("true") ->
+      apply atom("f") / int(2)(var("Z"),var("Y"))
+
+  end
+
+,glob(atom("mod2"), atom("f") / int(2)) ==> fun( var("X"),var("Y") )->
+  apply atom("g") / int(1)(var("X"))
+,glob(atom("mod2"), atom("g") / int(1)) ==> fun( var("X") )->
+  call atom("erlang") : atom("-") (var("X"),int(1))
+>, glob(atom("mod1"), atom("f") / int(2)) ==>
+    fun( var("X"),var("Y") )->
+  apply atom("g") / int(2)(var("X"),var("Y"))
+,glob(atom("mod1"), atom("g") / int(2)) ==> fun( var("X"),var("Y") )->
+  case < call atom("mod2") : atom("f") (var("X"),var("Y")) > of
+    < int(0) > when atom("true") ->
+      atom("ok")
+    < var("Z") > when atom("true") ->
+      apply atom("f") / int(2)(var("Z"),var("Y"))
+
+  end
+,glob(atom("mod2"), atom("f") / int(2)) ==> fun( var("X"),var("Y") )->
+  apply atom("g") / int(1)(var("X"))
+,glob(atom("mod2"), atom("g") / int(1)) ==> fun( var("X") )->
+  call atom("erlang") : atom("-") (var("X"),int(1)),
+pid(0)) .

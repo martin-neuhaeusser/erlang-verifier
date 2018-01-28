@@ -1,0 +1,13 @@
+debug reduce in SEM_EQUATIONS : 
+(sys-start, < tau | #no-res
+       | letrec (atom("endless") / int(0) = fun() -> apply atom("endless") / int(0) ()) in
+		 int(1)
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | #empty-modenv >,
+#empty-modenv,
+pid(0))
+
+.

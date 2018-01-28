@@ -1,0 +1,445 @@
+***(
+
+	SYSTEM.MAUDE
+	
+	This module defines the system level transitions. This is the rewriting theory
+	that operates upon the equivalence classes that are defined by the underlying
+	equational theory (given in the functional modules SEM_EQUATIONS and its submodules).
+	
+	In contrast to the oriented equations and equational attributes that constitute 
+	the MEL theory, the rewriting rules do not have to terminate or to be Church Rosser.
+	
+	They represent the observable actions that the system can do. In our approach, we try
+	to move as many local evaluation steps as possible into the equational theory. This
+	reduces the search space significantly (for example, interleaving is not necessary
+	if completely autonomous steps are taken within different processes).
+	The rewriting rules that are specified here represent evaluation steps that may not
+	be included in the equational theory as they imply side effects onto other processes.
+	
+	The transition rules of the "system"-level are collected in the SEM_TRANSITION
+	module.
+
+	The functional module that constitutes the equational theory includes the different
+	sets of oriented equations and is called SEM_EQUATIONS.
+	
+	The whole theory, consisting of the rewriting rules and the equational theory 
+	is then given by the module THEORY.
+	
+***)
+
+mod SEM_TRANSITION is
+	protecting SYNTAX . 
+	protecting SEM_LABEL .
+	protecting SEM_EXCEPTION .
+	protecting SEM_MATCH_MAILBOX .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting SEM_SYSLABEL .
+	protecting SEM_LIST_NORMALFORM .
+		
+	vars EX EX1 EX2 : Expr .
+	vars PID PID1 : Pid .
+	vars MBOX MBOX1 : Mailbox .
+	vars LINKS LINKS1 : PidSequence .
+	vars TRAP TRAP1 : Bool .
+	vars INT INT1 : Int .
+	vars ME ME1 ME' : ModEnv .
+	vars C C1 C2 : Const .
+	vars A1 A2 : Atom .
+	var SL : SysLabel .
+	var EL EL1 EL1' : Label .
+	var EXCLASS : ExceptionClass .
+	var PRCS : Processes .
+	var PIDS : PidSequence .
+	var LIST : ListConst .
+	var RES : SysResult .
+	
+	*** Spawning of a new processes
+	*** The evaluation within the equational theory yields a process whose process label indicates
+	*** that the built-in function "spawn" has been evaluated. The following rule calculates an unused
+	*** process identifier, introduces a new process and returns the PID of the newly created process
+	*** via the return component of the creator process. The new process evaluates the inter-module
+	*** call, that is originally specified in the arguments of the spawn statement and then propagated
+	*** via the process label.
+	crl [sys-spawn] : (SL, < spawn(A1, A2, LIST) | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		 	  (sys-newproc(PID, pid(INT), A1, A2, LIST), 
+			   < tau | #res-spawn(INT) | EX | PID | MBOX | LINKS | TRAP | ME > ||
+			   < tau | #no-res | EX1 | pid(INT) | #empty-mbox | #empty-pid-seq | false | ME' > || PRCS, ME', pid(INT), PIDS) 
+		if INT := #getNewPid(PIDS) 
+		/\ EX1 := if LIST == [] 
+			  	then call A1 : A2 ()
+			  	else call A1 : A2 (#getListElements(LIST)) 
+			  fi .
+
+			  
+			  	      			  
+			  
+	*** Spawning a new process and (atomically) linking the creator-process with the newly 
+	*** created process. Apart from additionally linking both processes, the procedure is
+	*** exactly the same as above.
+	crl [sys-spawnlink] : (SL, < spawn-link(A1, A2, LIST) | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		    	      (sys-newproc-linked(PID, pid(INT), A1, A2, LIST),
+			       < tau | #res-spawn(INT) | EX | PID | MBOX | #insertPidUnique(LINKS, INT) | TRAP | ME > ||
+			       < tau | #no-res | EX1 | pid(INT) | #empty-mbox | PID | false | ME' > || PRCS, ME', pid(INT), PIDS) 
+		if INT := #getNewPid(PIDS)
+		/\ EX1 := if LIST == []
+			  	then call A1 : A2 ()
+			  	else call A1 : A2 (#getListElements(LIST)) 
+			  fi .
+	  
+	
+	
+	
+	*** Message passing
+	*** A process of the process system was normalized by the equational theory and its label
+	*** indicates, that it will send a message to another process. As this is a side-effect,
+	*** it is modelled by an appropriate transition on the system level.
+	*** Note: The send operation can fail if the specified receiver process does not exist.
+	***       Therefore, we indicate success by returning a flag (#res-send({true|false})) 
+	***       in the sender's result component.
+	*** First, we deal with the case of an existing receiver process:
+	*** Note: In this case, we have to check if the receiving process is in the "blocked"
+	***	  or "waiting" state (this is indicated by appropriate process labels). 
+	***       This would denote that it was evaluating a receive statement and has not
+	***	  found a matching message in its mailbox. Now it receives a message, and the
+	***	  check has to be done again - we unblock the process by setting the label
+	***	  back to tau, thereby restarting evaluation of the receive statement with
+	***	  the (now extended) mailbox within the equational theory.
+	crl [sys-send] : (SL,
+	                  < pid(INT) ! C | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || 
+                          < EL1 | RES | EX1 | pid(INT) | MBOX1 | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) =>
+		         (sys-sendmsg(PID, pid(INT),C),
+			  < tau | #res-send(true) | EX | PID | MBOX | LINKS | TRAP | ME > ||
+			  < EL1' | RES | EX1 | pid(INT) | MBOX1 : C | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) 
+		if EL1' := if (EL1 == waiting) or (EL1 == blocked) 
+			 	then tau
+			   	else EL1 
+			 fi .
+				    
+	*** Second case: Sending a message to a non-existing process is requested. We indicate
+	***              failure by setting the returned flag to false and discard the message.
+	***		 A corresponding exception is thrown within the succeeding evaluation
+	***		 within the equational theory indicating that the receiver process
+	***		 does not exist.
+	crl [sys-send] : (SL,
+	                  < pid(INT) ! C | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		         (sys-sendmsg(PID, pid(INT),C),
+			  < tau | #res-send(false) | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) 
+		if not(#existsPid(PIDS, INT)) .
+	
+	*** Third case: A process sends a message to itself.
+	***             The receiving process can therefore not be in the blocked state (i.e. there is no need
+	***             to re-enable normalisation here)
+	*** Note: It is impossible that the process is in the blocked state because it just sent a message.
+	rl [sys-send] : (SL,
+	                 < pid(INT) ! C | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		        (sys-sendmsg(pid(INT), pid(INT),C),
+			 < tau | #res-send(true) | EX | pid(INT) | MBOX : C | LINKS | TRAP | ME > || PRCS, ME', PIDS) .
+	    
+			 			 
+			 
+					 				
+	*** Receive system transition
+	*** Case 1: Successful reception of the message C. 
+	***         If we have a process in the process system with a "receive" label, this indicates
+	***	    successful reception. We reset the process' label to "tau" (thereby enabling further
+	***	    local evaluation within the equational theory) and continue. No special result value is
+	***	    returned.
+	*** Note: This rule is necessary only if timeouts may occur. In this case, one wants to differentiate
+	***       between send- and receive operations because messages may get lost due to timeout events.
+	***	  If we would treat reception entirely within the equational theory, we would not observe the 
+	***	  reception of a message. The non-deterministic modelling of the timeout events is possible
+	***	  only within the system level's rewriting rules.
+	crl [sys-receive] : (SL,
+	                     < receive(C) | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		            (sys-receive(PID, C),
+			     < tau | #no-res | EX | PID | MBOX1 | LINKS | TRAP | ME > || PRCS, ME', PIDS) 
+            if MBOX1 := #extractMessage(MBOX | C) .			     
+
+	*** Case 2: A process is evaluating a receive statement, where a timeout value is given.
+	***         No matching message is in the mailbox. This is indicated by the "waiting"
+	***	    process label. This rule simulates a timeout event. It resets the process'
+	***	    label to tau and returns a flag indicating the timeout event.
+	***	    This causes the equational theory to evaluate the receive statement's timeout
+	***	    expression.
+	*** Note: Here we signal that a timeout has occurred using the result flag (by setting the result
+	***       flag to true). As we do not have a notion of time in our specification, we "simulate"
+	***	  the timeout occurrence by nondeterminism.
+	rl [sys-timeout] : (SL,
+	                    < waiting | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+		           (sys-timeout(PID),
+			    < tau | #res-timeout | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) .
+
+			   
+			   
+			   
+	*** Sending of exit-signals to other processes
+	*** A process indicates an uncaught exception (if it was caught, this would have already occurred within
+	*** the equational theory). If the process' label indicates an exception within the rewriting rules of
+	*** the system level, the exception was not caught by a surrounding catch statement.
+	*** This leads to the termination of the affected process. Before the process is removed from the
+	*** process system (see the rule labelled sys-procterm), it broadcasts exit-signals to its linked
+	*** processes.
+	*** First, we consider the case that the set of linked processes is not empty and that the linked
+	*** process exists and has an unset trap exit flag. If the signal does not indicate normal termination,
+	*** the linked process is then killed by the signal.
+	*** Note: The PidSequence is an associative and commutative list with an identity element #empty-pid-seq!
+	crl [sys-termsignal] : (SL,
+	                        < exception(EXCLASS, C1) | #no-res | EX1 | pid(INT) | MBOX | PID1,LINKS | TRAP | ME > || 
+			        < EL1 | RES | EX2 | PID1 | MBOX1 | pid(INT), LINKS1 | false | ME1 > || PRCS, ME', PIDS) =>
+			       (sys-signal(pid(INT), PID1, C2),
+			        < exception(EXCLASS, C1) | #no-res | EX1 | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			        < tau | #no-res | primop atom("raise") (atom("exit"), C1) | PID1 | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS)
+		if C1 =/= atom("normal")
+		*** computation of the signal that would be sent (if the trap-exit flag was set)
+		/\ C2 := if (EXCLASS == thrown)
+				then {atom("EXIT"), int(INT), {atom("nocatch"), C1}}
+				else {atom("EXIT"), int(INT), C1}
+			 fi .
+					 
+	*** If the trap-exit flag is set, the receiving process is not terminated but receives a corresponding
+	*** message in its mailbox. 
+	*** Note: In case that the process which receives the signal is in the waiting or blocked state, it
+	***       is possible that it is waiting for a "signal"-message. In this case, we have to reset the
+	***	  process' label to tau in order to re-enable normalisation and reception of the new message.
+	crl [sys-termsignal] : (SL,
+	                        < exception(EXCLASS, C1) | #no-res | EX1 | pid(INT) | MBOX | PID1,LINKS | TRAP | ME > || 
+				< EL1 | RES | EX2 | PID1 | MBOX1 | pid(INT), LINKS1 | true | ME1 > || PRCS, ME', PIDS) =>
+			       (sys-signal(pid(INT),PID1,C2),
+			        < exception(EXCLASS, C1) | #no-res | EX1 | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			        < EL1' | RES | EX2 | PID1 | MBOX1 : C2 | LINKS1 | true | ME1 > || PRCS, ME', PIDS)
+		if C2 := if (EXCLASS == thrown)
+				then {atom("EXIT"), int(INT), {atom("nocatch"), C1}}
+				else {atom("EXIT"), int(INT), C1}
+			 fi 
+		/\ EL1' := if (EL1 == blocked) or (EL1 == waiting)
+				then tau
+				else EL1
+			 fi .
+	    
+	*** If the signal is a "normal" exit-signal and the trap-exit flag is not set, we ignore this signal.
+	*** The link entries in both participating processes are removed.
+	rl [sys-termsignal] : (SL,
+	                       < exception(exit, atom("normal")) | #no-res | EX | pid(INT) | MBOX | PID1,LINKS | TRAP | ME > || 
+			       < EL1 | RES | EX1 | PID1 | MBOX1 | pid(INT), LINKS1 | false | ME1 > || PRCS, ME', PIDS) =>
+			      (sys-signal(pid(INT), PID1, {atom("EXIT"), int(INT), atom("normal")}),
+			       < exception(exit, atom("normal")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			       < EL1 | RES | EX1 | PID1 | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS) .
+
+	*** If the signal is sent to a non-existing process, we ignore it.
+	crl [sys-termsignal] : (SL,
+	                        < exception(EXCLASS, C1) | #no-res | EX | PID | MBOX | pid(INT),LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+			       (sys-signal(PID, pid(INT), C2),
+			        < exception(EXCLASS, C1) | #no-res | EX | PID | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS)
+		if not(#existsPid(PIDS, INT)) 
+		/\ C2 := if (EXCLASS == thrown)
+				then {atom("EXIT"), int(INT), {atom("nocatch"), C1}}
+				else {atom("EXIT"), int(INT), C1}
+			 fi .
+	
+	
+	
+	*** Sending of exit signals due to the exit(Pid,Reason) built-in function
+	*** Exit-Signals can be propagated either during process termination (see above). In this case, the Reason term
+	*** is broadcast to all linked processes in the terminating process' set of links.
+	*** The other possibility is, that a process evaluates the expression 'erlang':'exit'(Pid,Reason). This
+	*** sends an 'EXIT'-Signal to the process given in the first argument; the reason is set accordingly.
+	*** We have to distinguish the same cases as above (but now, the source is not an exception that terminates
+	*** the sending process). The sender process does not terminate however.
+	*** First case: The receiving process traps 'EXIT-signals. Therefore we convert the signal into a
+	***		message and put it into the process' mailbox. If the process is in the waiting or
+	***		blocked state, we have to re-enable reception (since the mailbox changed)
+	crl [sys-signal] : (SL,
+			    < send-signal(pid(INT1), C) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > ||
+			    < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | true | ME1 > || PRCS, ME', PIDS) =>
+			   (sys-signal(pid(INT), pid(INT1), {atom("EXIT"), int(INT), C}),
+			    < tau | #res-signal(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			    < EL1' | RES | EX1 | pid(INT1) | MBOX1 : {atom("EXIT"), int(INT), C} | LINKS1 | true | ME1 > || PRCS, ME', PIDS) 
+		if C =/= atom("kill")
+		/\ EL1' := if (EL1 == waiting) or (EL1 == blocked)
+				then tau
+				else EL1
+			 fi .
+
+	*** 2nd case: If the receiving process does not trap 'EXIT'-signals, and the received signal does not indicate
+	***           normal process termination (i.e. the reason term is 'normal'), the receiver terminates and
+	***           propagates 'EXIT'-signals by itself (now due to the exception that is raised).
+	crl [sys-signal] : (SL,
+			    < send-signal(pid(INT1), C) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > ||
+			    < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS) =>
+			   (sys-signal(pid(INT), pid(INT1), {atom("EXIT"), int(INT), C}),
+			    < tau | #res-signal(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			    < tau | #no-res | primop atom("raise") (atom("exit"), C) | pid(INT1) | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS)
+		if C =/= atom("kill") 
+		/\ C =/= atom("normal") .
+	
+	*** Third case: Using 'erlang':'exit'(Pid, 'kill') is a means to force immediate termination of the specified
+	***             Process. These 'kill'-signals are not trappable. Therefore we terminate the corresponding
+	***		process discarding its current expression and replacing it with a primitive operation that
+	***		terminates it.
+	rl [sys-signal] : (SL,
+			   < send-signal(pid(INT1), atom("kill")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > ||
+			   < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) =>
+			  (sys-signal(pid(INT), pid(INT1), {atom("EXIT"), int(INT), atom("kill")}),
+			   < tau | #res-signal(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			   < tau | #no-res | primop atom("raise") (atom("exit"), atom("killed")) | pid(INT1) | MBOX1 | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) .
+	
+	*** Fourth case: If the receiver does not trap exit-signals and receives a signal indicating normal
+	***		 process termination, the signal is ignored:
+	rl [sys-signal] : (SL,
+			   < send-signal(pid(INT1), atom("normal")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > ||
+			   < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS) =>
+			  (sys-signal(pid(INT), pid(INT1), {atom("EXIT"), int(INT), atom("normal")}),
+			   < tau | #res-signal(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			   < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | false | ME1 > || PRCS, ME', PIDS) .
+			   
+	*** Fifth case: If the receiving process does not exist, we discard the signal. The failure is propagated
+	***		back to the equational theory.
+	crl [sys-signal] : (SL,
+			    < send-signal(pid(INT1), C) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+			   (sys-signal(pid(INT), pid(INT1), {atom("EXIT"), int(INT), C}),
+			    < tau | #res-signal(false) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) 
+		if not(#existsPid(PIDS, INT1)) .
+	
+	*** The following rules treat the cases, where a process sends an 'EXIT'-Signal to itself.
+	*** Note: This case does not occur when considering 'EXIT'-propagation due to exceptions, since links may
+	***	  not be established to the same process.
+	*** First case: We trap exit-signals and a signal (other than 'kill') is sent:
+	crl [sys-signal] : (SL,
+			    < send-signal(pid(INT), C) | #no-res | EX | pid(INT) | MBOX | LINKS | true | ME > || PRCS, ME', PIDS) =>
+			   (sys-signal(pid(INT), pid(INT), {atom("EXIT"), int(INT), C}),
+			    < tau | #res-signal(true) | EX | pid(INT) | MBOX : {atom("EXIT"), int(INT), C} | LINKS | true | ME > || PRCS, ME', PIDS) 
+		if C =/= atom("kill") .
+	
+	*** 2nd case: We do not trap exit signals, and a 'normal' signal is received (and ignored):		 
+	rl [sys-signal] : (SL,
+			   < send-signal(pid(INT), atom("normal")) | #no-res | EX | pid(INT) | MBOX | LINKS | false | ME > || PRCS, ME', PIDS) =>
+			  (sys-signal(pid(INT), pid(INT), {atom("EXIT"), int(INT), atom("normal")}),
+			   < tau | #res-signal(true) | EX | pid(INT) | MBOX | LINKS | false | ME > || PRCS, ME', PIDS) .
+	
+	*** Third case: The process sends a kill-signal to itself. This forces process termination:
+	rl [sys-signal] : (SL,
+			   < send-signal(pid(INT), atom("kill")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+			  (sys-signal(pid(INT), pid(INT), {atom("EXIT"), int(INT), atom("kill")}),
+			   < tau | #no-res | primop atom("raise") (atom("exit"), atom("killed")) | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) .
+			    
+ 	
+	
+	
+	*** Termination of a process on the system level
+	*** The corresponding process is removed, its pid is deleted from the list of used pids and
+	*** the system level label signals the process's termination.
+	*** Note: This rule can only be applied if the set of linked processes is empty. Therefore we enforce
+	***       that the exit-signals are broadcast before the process is removed.
+	rl [sys-procterm] :  (SL,
+	                      < exception(EXCLASS, C) | #no-res | EX | PID | MBOX | #empty-pid-seq | TRAP | ME > || PRCS, ME', PID, PIDS) =>
+			     (sys-terminate(PID),
+			      PRCS, ME', PIDS) .
+	
+	
+	
+			      
+	*** Establishing a link between two processes.
+	*** Evaluation of the link statement within the equational theory leads to a side-effect that
+	*** is indicated by the process label. 
+	*** Case 1: The insertion of the process identifiers into the set of linked processes is done 
+	***         here.
+	rl [sys-link] : (SL,
+	                 < link(pid(INT1)) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+	                 < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) =>
+	                (sys-link(pid(INT), pid(INT1)),
+			 < tau | #res-link(true) | EX | pid(INT) | MBOX | #insertPidUnique(LINKS, INT1) | TRAP | ME > || 
+			 < EL1 | RES | EX1 | pid(INT1) | MBOX1 | #insertPidUnique(LINKS1,INT) | TRAP1 | ME1 > || PRCS, ME', PIDS) .
+
+	*** According to the erlang language specification, if a process tries to establish a link to itself,
+	*** nothing is done. This is not an error-situation, therefore we indicate success in the result-term. 
+	rl [sys-link] : (SL,
+	                 < link(pid(INT)) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+	                (sys-link(pid(INT), pid(INT)),
+			 < tau | #res-link(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) .
+			 
+	*** The link operation fails, because the requested peer process does not exist.
+	*** Here we return a flag indicating the failure of the link operation.
+	crl [sys-link] : (SL,
+	                  < link(pid(INT1)) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+	                 (sys-link(pid(INT), pid(INT1)),
+			  < tau | #res-link(false) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) 
+		if not(#existsPid(PIDS, INT1)) .
+			 
+			 	
+				
+								   
+	*** Deletion of the link between the two processes:
+	rl [sys-unlink] : (SL,
+	                   < unlink(pid(INT1)) | #no-res | EX | pid(INT) | MBOX | pid(INT1), LINKS | TRAP | ME > || 
+	                   < EL1 | RES | EX1 | pid(INT1) | MBOX1 | pid(INT), LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) =>
+	                  (sys-unlink(pid(INT),pid(INT1)),
+			   < tau | #res-link(true) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || 
+			   < EL1 | RES | EX1 | pid(INT1) | MBOX1 | LINKS1 | TRAP1 | ME1 > || PRCS, ME', PIDS) .
+			   
+	*** The unlink operation fails because the specified 2nd process does not exist:
+	crl [sys-unlink] : (SL,
+	                    < unlink(pid(INT1)) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+	                   (sys-unlink(pid(INT), pid(INT1)),
+			    < tau | #res-link(false) | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) 
+		if not(#existsPid(PIDS, INT1)) .
+
+		
+		
+		
+	*** Setting and resetting of the trap exit flag:
+	rl [sys-prcflag] : (SL,
+	                    < trapexit(atom("true")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+	                   (sys-trapexit(pid(INT), atom("true")),
+			    < tau | #no-res | EX | pid(INT) | MBOX | LINKS | true | ME > || PRCS, ME', PIDS) .
+	
+	rl [sys-prcflag] : (SL,
+	                    < trapexit(atom("false")) | #no-res | EX | pid(INT) | MBOX | LINKS | TRAP | ME > || PRCS, ME', PIDS) =>
+	                   (sys-trapexit(pid(INT), atom("false")),
+			    < tau | #no-res | EX | pid(INT) | MBOX | LINKS | false | ME > || PRCS, ME', PIDS) .
+		
+		
+		
+		
+	*** the noop transition
+	*** Note: This is a rewrite rule that does not change the process system. It only
+	***	  indicates that it has been applied by changing the system label.
+	***	  It obviously leads to an infinite sequence of rewriting steps.
+	***       Because the process system does not change, and iterating its application
+	***	  does not change the whole process environment any more, the LTS is still 
+	***	  computable (if it is finite without this rule).
+	***	  Introducing this rule leads to a linear growth of the search space by 
+	***	  a factor of 2 (in the worst case). Note however, that for states that are
+	***	  distinguished only due to differences in their transition component,
+	***	  a sys-noop transition leads into the same state (because now the transition
+	***	  label coincides in both cases to sys-noop).
+	***
+	***	  The motivation for this rule is, that we get the possibility to specify any 
+	***	  scheduling strategy used by the erlang runtime environment (or any other 
+	***	  scheduling strategy). Taking another perspective, introducing this rule 
+	***	  eliminates any determinism (all process environments can be rewritten
+	***	  infinitely). It follows, that even if there is only one process that
+	***	  could be rewritten (a deterministic choice), this rewriting step does 
+	***	  not need to take place anymore.
+	***	  Therefore, any process (even if it is the only one that can be evaluated
+	***	  further) may wait infinitely to be scheduled.
+	***
+	***	  This generality allows us to freely specify any (even the most stupid) 
+	***	  scheduling strategies. For more information, look at the scheduler
+	***	  function defined in the module SEM_FORMULAE in the file ltl-check.maude
+	rl [sys-noop] : (SL, PRCS, ME, PIDS) => (sys-noop, PRCS, ME, PIDS) .
+endm
+
+fmod SEM_EQUATIONS is
+	protecting SYNTAX .
+	protecting SEM_NORMALISATION .
+	protecting SEM_PRIMOP .
+	protecting SEM_COREBIB .
+	protecting SEM_IOBIB .
+	protecting SEM_LISTBIB .
+endfm
+
+mod THEORY is
+	protecting SYNTAX .
+	protecting SEM_EQUATIONS .
+	protecting SEM_TRANSITION .
+endm

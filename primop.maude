@@ -1,0 +1,60 @@
+***(
+
+	PRIMOP.MAUDE
+	
+	In this file, we define a small module that belongs to the equational theory and
+	defines the semantics of a (very limited) subset of the primitive operations.
+	Currently, there is only a function indicating a matching failure and another
+	primitive that provides a unified interface to raising exceptions.
+	
+***)
+
+fmod SEM_PRIMOP is
+	protecting SEM_PROCESS .
+	
+	var C : Const .
+	var PID : Pid .
+	var MBOX : Mailbox .
+	var LINKS : PidSequence .
+	var TRAP : Bool .
+	var ME : ModEnv .
+	var EXCLASS : ExceptionClass .
+	
+	*** the compiler-generated argument to the match_fail operation has the desired form
+	*** {'function_clause', [anonymous_variable]}
+	eq < tau | #no-res | primop atom("match_fail") (C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < exception(exit, C) | #no-res | atom("bottom") | PID | MBOX | LINKS | TRAP | ME > .
+	   
+	
+	   
+	*** The built in operation raise raises an exception. The first atom decides
+	*** what class the exception belongs to. The possible values and the corresponding meanings
+	*** are as follows:
+	*** 			exit	normal termination, no error
+	***				~> exit-signals are sent that contain the atom 'EXIT'
+	***				   indicating process termination and the reason (in
+	***				   fact an Core-Erlang constant)
+	***				~> in this case, the Reason is extended by a stack-trace.
+	***				   This is implementation dependent; therefore we do not 
+	***				   care about this and simply extend the reason term 
+	***				   by the empty list.
+	***			error	error that is normally logged, with stacktrace
+	***				~> exit-signals are propagated with 'EXIT' in the first
+	***				   component of the message-tuple and the reason-term
+	***				   in the second compontent.
+	***			thrown	the exception is thrown by the user for non-local return
+	***				~> leads to a nocatch error if not caught by catch/try
+	***				   statement
+	***				~> 'EXIT'-signals are sent as above, but the reason is
+	***				   converted into a tuple {nocatch, Reason}
+	eq < tau | #no-res | primop atom("raise") (atom("error"), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < exception(error, {C, []}) | #no-res | atom("bottom") | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The built in operation raise raises an exception with the arguments exactly as given	   
+	eq < tau | #no-res | primop atom("raise") (atom("exit"), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < exception(exit, C) | #no-res | atom("bottom") | PID | MBOX | LINKS | TRAP | ME > .
+
+	*** The built in operation raise raises an exception with the arguments exactly as given	   
+	eq < tau | #no-res | primop atom("raise") (atom("throw"), C) | PID | MBOX | LINKS | TRAP | ME > =
+	   < exception(thrown, C) | #no-res | atom("bottom") | PID | MBOX | LINKS | TRAP | ME > .
+endfm

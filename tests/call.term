@@ -1,0 +1,15 @@
+debug reduce in SEM_EQUATIONS : 
+(sys-start, < tau | #no-res
+       | call atom("testcall") : atom("function") (int(5)) 
+       | pid(0) 
+       | #empty-mbox 
+       | #empty-pid-seq 
+       | false 
+       | (glob(atom("testcall"), atom("function") / int(1)) ==> 
+            (fun(var("X"))->
+  	         call atom("erlang") : atom("+") (var("X"), var("X")))) >,
+
+#empty-modenv,
+pid(0))
+
+.

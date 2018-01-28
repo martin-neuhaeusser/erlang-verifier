@@ -1,0 +1,197 @@
+***(
+
+	LOOP.MAUDE
+	
+	In this module we define the LOOP-MODE interface for user interaction on the
+	command line of the Maude interpreter.
+	
+	In the functional module COMMAND-GRAMMAR, we specify a set of commands that can
+	be used from within the Maude command line to control the actions of the system:
+		* loading a Core-Erlang source file
+		* specifying a statement and computing the states
+		* starting the model checker
+	
+	To output the states that are computed, we define the STATESPACE-OUTPUT functional
+	module. It calculates all the states and outputs them correspondingly.
+
+	The ERLANG-LOOP module finally implements the interface to Maude's input/output
+	subsystem and defines rewriting rules that implement the commands.
+	Note: The model checker uses the equational theory and the rewriting theory of
+	      the module in which it is started; therefore our theory has to be included
+	      into the ERLANG-LOOP module (it starts the model-checking computation)
+***)
+
+fmod COMMAND-GRAMMAR is
+	protecting PARSING-SYNTAX .
+	protecting LTL-FORMULAE .
+
+	*** The commands that may be issued to the system are terms of sort Command.
+	sort Command .
+	
+	*** The add-module directive includes the function definitions from
+	*** the Core-Erlang module that is given as an argument.
+	*** Note: Use the (Core-Erlang) output of the Erlang compiler; the "maudify" 
+	***       tool automatically clears up the syntax. Additionally one has to
+	***       put brackets around the function definitions within the Core-Erlang
+	***	  source-code.
+	op add-module : ErlModule -> Command [ctor] .
+	
+	*** The show-states command takes an expression that should be evaluated and
+	*** computes the corresponding states. Note: An initial process with process
+	*** identifier pid(0) is created that "knows" all the functions that were
+	*** hitherto included by add-module commands.
+	op show-states : Expr -> Command [ctor] .
+	
+	*** The model-check command takes the expression that initiates the computation
+	*** and a LTL-Formula as arguments. The syntax and semantics of the LTL
+	*** predicates is described in the file ltl-check.maude
+	op model-check : Expr Formula -> Command [ctor] .
+endfm
+
+fmod STATESPACE-OUTPUT is
+	protecting INT .
+	protecting META-LEVEL .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting PROCESS-OUTPUT .
+	
+	op #PrintStates : ProcessEnvironment -> QidList [frozen] .
+	op #PrintStates : ProcessEnvironment Int -> QidList [frozen] .
+	
+	sort StateList .
+	subsort ProcessEnvironment < StateList .
+	op #empty-statelist : -> StateList .
+	op _,_ : StateList StateList -> StateList [ctor assoc comm id: #empty-statelist] .
+	
+	op #computeStates : ProcessEnvironment -> StateList .
+	op #computeStates(_|_) : StateList StateList -> StateList .
+	op #computeSuccessors : ProcessEnvironment -> StateList .
+	op #computeSuccessors : ProcessEnvironment Int -> StateList .
+	op #setMinus(_|_) : StateList StateList -> StateList .
+	
+	vars PE PE' : ProcessEnvironment .			
+	var SEARCH : ResultTriple .
+	var TERM : Term .
+	var TYPE : Type .
+	var SUB : Substitution .
+	var INT : Int .
+	
+	vars PROCESSED NEW ADD SUCC STATELIST1 STATELIST2 : StateList .
+	var CURR : ProcessEnvironment .
+	
+	eq #computeSuccessors(PE) = #computeSuccessors(PE, 0) .
+	*** arguments to the metaSearch operation:
+	*** 1. metarepresentation of the module that defines the equations and rewriting rules
+	***    that comprise the system
+	*** 2. the metarepresentation of the starting term for the search operation
+	*** 3. the metarepresentation of the pattern to search for
+	*** 4. the metarepresentation of a condition to be satisfied
+	*** 5. the metarepresentation of the kind of search ('+, '*, '! for one or more,
+	***    zero or more rewriting steps or normal forms, respectively)
+	*** 6. a value that is interpreted as a bount on the number of rewriting steps.
+	*** 7. the solution number.
+	*** Note: Here we force exactly one step by specifying '+ as the kind of search
+	***       and 1 as the maximum search depth
+	***       All one-rewrite-step solutions are collected by incrementing the
+	***	  solution number until no more solutions are found.
+	ceq [compute-successors] :
+	        #computeSuccessors(PE, INT) = PE', #computeSuccessors(PE, INT + 1) 
+		if SEARCH := metaSearch(['THEORY], #up(PE), 'PE:ProcessEnvironment, nil, '+, 1, INT) 
+		/\ { TERM, TYPE, SUB } := SEARCH
+		/\ PE' := #downProcessEnvironment(TERM) .
+	eq #computeSuccessors(PE, INT) = #empty-statelist [owise] .
+
+	eq #computeStates(PE) = #computeStates(#empty-statelist | PE) .
+	ceq #computeStates(PROCESSED | CURR, NEW) = #computeStates(PROCESSED, CURR | NEW, ADD)
+		if SUCC := #computeSuccessors(CURR)
+		/\ ADD := #setMinus(SUCC | PROCESSED, CURR, NEW) .
+	eq #computeStates(PROCESSED | #empty-statelist) = PROCESSED .
+	
+	eq #setMinus(STATELIST1 | #empty-statelist) = STATELIST1 .
+	eq #setMinus(PE, STATELIST1 | PE, STATELIST2) = #setMinus(STATELIST1 | PE,STATELIST2) .
+	eq #setMinus(STATELIST1 | PE, STATELIST2) = #setMinus(STATELIST1 | STATELIST2) [owise] .
+	
+	eq #PrintStates(STATELIST1) = #PrintStates(STATELIST1, 0) .
+	eq #PrintStates(#empty-statelist, INT) = '\n '== 'summary '== '\n metaPrettyPrint(['INT], #up(INT)) 'states 'total. .
+	eq #PrintStates(PE, STATELIST1, INT) = #PrintProcessEnv(PE) '\n #PrintStates(STATELIST1, INT + 1) .
+endfm
+
+mod ERLANG-LOOP is
+	protecting QID .
+	protecting META-LEVEL .
+	including LOOP-MODE .
+	protecting PARSING-SYNTAX-DOWN .
+	protecting PRINT-SYNTAX-ERROR .   
+	protecting LTL-FORMULAE .
+	protecting DOWN-LTL .
+	protecting MAUDE-SYNTAX-UP .
+	protecting MODEL-CHECKER .
+	protecting THEORY .
+	protecting SEM_PROCESSENVIRONMENT .
+	protecting MODEL-CHECK-OUTPUT .
+	protecting STATESPACE-OUTPUT .
+			
+	*** This system module is a simple interface to Maude's LOOP-MODE module. 
+	*** We use LOOP-MODE as the input/output facility. If a command according
+	*** to the command grammar above is input in parenthesis (s.t. it is recognized
+	*** as input to the loop), we execute the corresponding actions by rewriting.
+		
+	*** To distinguish different phases during command execution: We accept input
+	*** in the idle phase. After parsing the quoted identifiers that were input,
+	*** we end up in the parsed or error phase.
+	sort Phase .
+	op idle : -> Phase .
+	op parsed : -> Phase .
+	op error : -> Phase .
+
+	sort ParseResult .
+	subsort Term < ParseResult .
+	op #no-parse : -> ParseResult .
+
+	*** the state-component of the loop-mode triple
+	op <_,_,_> : Phase ParseResult ProcessEnvironment -> State [frozen] .
+
+	op init : -> System .
+	eq init = [nil, < idle, #no-parse, (sys-start, #empty-processes, #empty-modenv, #empty-pid-seq) >, nil] .
+	
+	vars QIL QIL' : QidList .
+	vars T T1 T2 : Term .
+	var Result : ResultPair? .
+	var MCHK : ModelCheckResult .
+	var PE : ProcessEnvironment .
+	var ME : ModEnv .
+	var F : Formula .
+	var EX : Expr .
+	var SL : SysLabel .
+				
+	crl [in] : [QIL, < idle, #no-parse, PE >, QIL'] 
+		=> if Result :: ResultPair 
+		   then 
+			[nil, < parsed, getTerm(Result), PE >, 'parsing 'complete '\n]
+		   else
+			[nil, < error, #no-parse, PE >, printSyntaxError(Result, QIL)]
+		   fi
+	    if QIL =/= nil /\
+	       Result := metaParse(GRAMMAR, QIL, 'Command) .
+
+	rl [add-module] : [nil, < parsed, 'add-module[T], PE >, QIL'] 
+		=> [nil, < idle, #no-parse, (#update-process-environment(PE, #downModule(T))) >, QIL' 'module 'included '.] .
+	crl [show-states] : [nil, < parsed, 'show-states[T], (SL, #empty-processes, ME, #empty-pid-seq) >, QIL] 
+		=> [nil, < idle, #no-parse, (SL, #empty-processes, ME, #empty-pid-seq) >, QIL']
+	    if ME =/= #empty-modenv /\
+	       EX := #downExpr(T) /\
+	       QIL' := #PrintStates(#computeStates((sys-start, < tau | #no-res | EX | pid(0) | #empty-mbox | #empty-pid-seq | false | ME >, ME, pid(0)))) .
+	
+	rl [show-states] : [nil, < parsed, 'show-states[T], (SL, #empty-processes, #empty-modenv, #empty-pid-seq) >, QIL] 
+		=> [nil, < idle, #no-parse, (SL, #empty-processes, #empty-modenv, #empty-pid-seq) >, QIL 'no 'Core-Erlang 'module 'loaded '! '\n] .
+		
+	crl [model-check] : [nil, < parsed, 'model-check[T1,T2], (SL, #empty-processes, ME, #empty-pid-seq) >, QIL] 
+		=> [nil, < idle, #no-parse, (SL, #empty-processes, ME, #empty-pid-seq) >, QIL']
+	    if ME =/= #empty-modenv /\
+	       EX := #downExpr(T1) /\
+	       F := #downLTL(T2) /\
+	       MCHK := modelCheck((sys-start, < tau | #no-res | EX | pid(0) | #empty-mbox | #empty-pid-seq | false | ME >, ME, pid(0)), F) /\
+	       QIL' := #PrintModelCheckResult(MCHK) .
+       	
+	rl [model-check] : [nil, < parsed, 'model-check[T1,T2], (SL, #empty-processes, #empty-modenv, #empty-pid-seq) >, QIL] 
+		=> [nil, < idle, #no-parse, (SL, #empty-processes, #empty-modenv, #empty-pid-seq) >, QIL 'no 'Core-Erlang 'module 'loaded '! '\n] .
+endm

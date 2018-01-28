@@ -1,0 +1,57 @@
+(add-module((module 'locker2' ['client' / 1,
+		  'locker' / 0,
+		  'module_info' / 0,
+		  'module_info' / 1,
+		  'start' / 0]
+    attributes []
+('locker' / 0 =
+        fun () -> 
+		receive
+	  	   < {'req',Client} >  when 'true' -> 
+	      do  		  call 'erlang' : '!'
+		      (Client, 'ok')
+		  		  receive
+		    		     < {'rel',_cor0} >  when call 'erlang' : '=:='
+					     (_cor0,
+					      Client) -> 
+			apply 'locker' / 0
+			    ()
+		  after 'infinity' -> 
+		    'true'
+	after 'infinity' -> 
+	  'true')
+('client' / 1 =
+        fun (_cor0) -> 
+	let  < 	     Client >  =
+	    	    call 'erlang' : 'self'
+		()
+	in  do  		call 'erlang' : '!'
+		    (_cor0, {'req',Client})
+		do  		    receive
+		      		       < 'ok' >  when 'true' -> 
+			  			  call 'erlang' : '!'
+			      (_cor0, {'rel',Client})
+		    after 'infinity' -> 
+		      'true'
+		    		    apply 'client' / 1
+			(_cor0))
+('start' / 0 =
+        fun () -> 
+	let  < 	     LockerPid >  =
+	    	    call 'erlang' : 'self'
+		()
+	in  do  		call 'erlang' : 'spawn'
+		    ('locker2', 'client', [LockerPid | []])
+		do  		    call 'erlang' : 'spawn'
+			('locker2', 'client', [LockerPid | []])
+		    		    apply 'locker' / 0
+			())
+('module_info' / 0 =
+    fun () -> 
+	call 'erlang' : 'get_module_info'
+	    ('locker2'))
+('module_info' / 1 =
+    fun (_cor0) -> 
+	call 'erlang' : 'get_module_info'
+	    ('locker2', _cor0))
+end)))
